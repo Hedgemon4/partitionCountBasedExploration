@@ -4,6 +4,7 @@ import jax.numpy as jnp
 import optax
 from jaxtyping import Array, Float, Int, PyTree
 
+### TODO: Use tyro instead of this
 SEED = 1
 LEARNING_RATE = 1e-3
 
