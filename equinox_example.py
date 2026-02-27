@@ -54,6 +54,7 @@ print(dummy_x.shape)  # 64x1x28x28
 print(dummy_y.shape)  # 64
 print(dummy_y)
 
+
 class CNN(eqx.Module):
     layers: list
 
@@ -82,6 +83,7 @@ class CNN(eqx.Module):
             x = layer(x)
         return x
 
+
 key, subkey = jax.random.split(key, 2)
 model = CNN(subkey)
 
@@ -90,15 +92,22 @@ print(model)
 
 # Define Loss
 
-def loss(model: CNN, x: Float[Array, "batch 1 28 28 "], y : Int[Array, " batch"]) -> Float[Array, ""]:
+
+def loss(
+    model: CNN, x: Float[Array, "batch 1 28 28 "], y: Int[Array, " batch"]
+) -> Float[Array, ""]:
     # Our input has shape (batch, 1, 28, 28) and our model expects (1, 28, 28) so we need to vmap
     pred_y = jax.vmap(model)(x)
     return cross_entropy(y, pred_y)
 
-def cross_entropy(y: Int[Array, " batch"], pred_y: Float[Array, "batch 10"]) -> Float[Array, ""]:
+
+def cross_entropy(
+    y: Int[Array, " batch"], pred_y: Float[Array, "batch 10"]
+) -> Float[Array, ""]:
     # y are the targets, pred_y are the log-softmax'd predictions
     pred_y = jnp.take_along_axis(pred_y, jnp.expand_dims(y, 1), axis=1)
     return -jnp.mean(pred_y)
+
 
 # Example Loss
 loss_value = loss(model, dummy_x, dummy_y)
@@ -115,9 +124,11 @@ print(output.shape)
 params, static = eqx.partition(model, eqx.is_array)
 print(params)
 
+
 def loss2(params, static, x, y):
     model = eqx.combine(params, static)
     return loss(model, x, y)
+
 
 loss_value, grads = jax.value_and_grad(loss2)(params, static, dummy_x, dummy_y)
 print(loss_value)
@@ -130,12 +141,16 @@ print(loss_value)
 
 # We can use eqx.filter_jit and it will handle what we had to deal with above automatically
 
+
 @eqx.filter_jit
-def compute_accuracy(model: CNN, x: Float[Array, "batch 1 28 27"], y : Int[Array, " batch"]) -> Float[Array, ""]:
+def compute_accuracy(
+    model: CNN, x: Float[Array, "batch 1 28 27"], y: Int[Array, " batch"]
+) -> Float[Array, ""]:
     # computes average accuracy of the model on the input batch
     pred_y = jax.vmap(model)(x)
     pred_y = jnp.argmax(pred_y, axis=1)
     return jnp.mean(y == pred_y)
+
 
 def evaluate(model: CNN, test_loader: torch.utils.data.DataLoader):
     # Evaluates the model on the test dataset
@@ -149,19 +164,33 @@ def evaluate(model: CNN, test_loader: torch.utils.data.DataLoader):
 
     return avg_loss / len(test_loader), avg_acc / len(test_loader)
 
+
 print(evaluate(model, test_loader))
 
 # Training with Optax
 
 optim = optax.adamw(LEARNING_RATE)
 
-def train(model: CNN, train_loader: torch.utils.data.DataLoader, test_loader: torch.utils.data.DataLoader, optim: optax.GradientTransformation, steps: int, print_every: int):
+
+def train(
+    model: CNN,
+    train_loader: torch.utils.data.DataLoader,
+    test_loader: torch.utils.data.DataLoader,
+    optim: optax.GradientTransformation,
+    steps: int,
+    print_every: int,
+):
     # Only want to train the arrays in our model
     opt_state = optim.init(eqx.filter(model, eqx.is_array))
 
     # Wrap everything in one jit
     @eqx.filter_jit
-    def make_step(model: CNN, opt_state: PyTree, x: Float[Array, "batch 1 28 28"], y: Int[Array, " batch"]):
+    def make_step(
+        model: CNN,
+        opt_state: PyTree,
+        x: Float[Array, "batch 1 28 28"],
+        y: Int[Array, " batch"],
+    ):
         loss_value, grads = eqx.filter_value_and_grad(loss)(model, x, y)
         updates, opt_state = optim.update(
             grads, opt_state, eqx.filter(model, eqx.is_array)
@@ -185,5 +214,6 @@ def train(model: CNN, train_loader: torch.utils.data.DataLoader, test_loader: to
                 f"test_loss={test_loss.item()}, test_accuracy={test_accuracy.item()}"
             )
     return model
+
 
 model = train(model, train_loader, test_loader, optim, STEPS, PRINT_EVERY)

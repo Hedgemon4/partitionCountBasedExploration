@@ -1,12 +1,21 @@
+from dataclasses import dataclass
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import optax
+import tyro
+import gymnax
 from jaxtyping import Array, Float, Int, PyTree
 
-### TODO: Use tyro instead of this
-SEED = 1
-LEARNING_RATE = 1e-3
+
+@dataclass
+class Args:
+    seed = 1
+    learning_rate = 1e-3
+    environment = "CartPole-v1"
+    num_environments = 32
+
 
 class QNetwork(eqx.Module):
     layers: list
@@ -31,12 +40,26 @@ class QNetwork(eqx.Module):
         return x
 
 
-def run():
-    print("Starting Run")
-    key = jax.random.PRNGKey(SEED)
+def make_env(environment_name, num_en):
+    env, env_params = gymnax.make(environment_name)
+
+    # vmap_step =
+
+    return env, env_params
+
+
+def run(args: Args):
+    key = jax.random.PRNGKey(args.seed)
+
+    # Environment Setup
+
+    # Network Setup
     key, subkey = jax.random.split(key, 2)
     model = QNetwork(input_size=4, num_actions=2, key=subkey)
-    optim = optax.adam(1e-3)
+    optim = optax.adam(args.learning_rate)
 
-if __name__ == '__main__':
-    run()
+
+if __name__ == "__main__":
+    args = tyro.cli(Args)
+    print("Starting Run")
+    run(args)
