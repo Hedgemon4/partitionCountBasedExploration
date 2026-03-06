@@ -87,24 +87,42 @@ def run(args: Args):
     key, subkey = jax.random.split(key, 2)
     state, env_state = vmap_reset(args.num_environments)(subkey)
 
-    ### TODO: Environment Step
-    def step(key, state, env_state, model):
-        # Get actions
-        q_values = jax.vmap(model)(state)
-        key, subkey = jax.random.split(key, 2)
-        actions = epsilon_greedy(subkey, args.epsilon_start, q_values)
+    # Get first actions
+    q_values = jax.vmap(model)(state)
+    key, subkey = jax.random.split(key, 2)
+    action = epsilon_greedy(subkey, args.epsilon_start, q_values)
+
+    ### TODO: Step Environments
+    def step(carry, _):
+        key, env_state, state, action = carry
 
         # Step Environment
         key, subkey = jax.random.split(key, 2)
         next_state, env_state, reward, done, info = vmap_step(args.num_environments)(
-            subkey, env_state, actions
+            subkey, env_state, action
         )
-        return next_state, env_state, reward, done, info
+
+        # Get next actions
+        q_values = jax.vmap(model)(next_state)
+        key, subkey = jax.random.split(key, 2)
+        next_action = epsilon_greedy(subkey, args.epsilon_start, q_values)
+
+        transition = Transition(
+            state=state,
+            action=action,
+            reward=reward,
+            next_state=next_state,
+            next_action=next_action,
+            done=done
+        )
+
+        return (key, env_state, next_state, next_action), (transition, info)
 
     key, subkey = jax.random.split(key, 2)
-    next_state, _, _, _, _ = step(subkey, state, env_state, model)
+    carry = (key, env_state, state, action)
+    final_outs, intermediate_values = jax.lax.scan(step, carry, None, args.num_steps)
 
-    return next_state
+    return final_outs, intermediate_values
     ### TODO: Compute Loss and Update Model
 
 
@@ -112,5 +130,5 @@ if __name__ == "__main__":
     args = tyro.cli(Args)
     print("Starting Run")
     compiled_run = jax.jit(run)
-    item = compiled_run(args)
-    print(item)
+    item1, item2 = compiled_run(args)
+
