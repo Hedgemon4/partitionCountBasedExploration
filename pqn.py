@@ -1,5 +1,3 @@
-from dataclasses import dataclass
-
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -19,6 +17,7 @@ class Args:
     environment = "CartPole-v1"
     num_environments = 32
     num_steps = 32
+    total_training_steps = 5e7
     epsilon_start = 1.0
     epsilon_end = 0.01
     epsilon_decay = 0.1
@@ -83,47 +82,67 @@ def run(args: Args):
 
     optimizer_state = optim.init(eqx.filter(model, eqx.is_array))
 
-    # Reset Environment
-    key, subkey = jax.random.split(key, 2)
-    state, env_state = vmap_reset(args.num_environments)(subkey)
+    num_epsilon_decay_steps = (
+        args.total_training_steps // args.num_environments // args.num_steps
+    )
 
-    # Get first actions
-    q_values = jax.vmap(model)(state)
-    key, subkey = jax.random.split(key, 2)
-    action = epsilon_greedy(subkey, args.epsilon_start, q_values)
+    # Epsilon Decay Setup
+    epsilon_schedule = optax.linear_schedule(
+        init_value=args.epsilon_start,
+        end_value=args.epsilon_end,
+        transition_steps=num_epsilon_decay_steps,
+    )
 
-    ### TODO: Step Environments
-    def step(carry, _):
-        key, env_state, state, action = carry
+    step_number = 0
 
-        # Step Environment
+    def train_step(key, step_number):
+        epsilon = epsilon_schedule(step_number)
+
+        ### TODO: Step Environments
+        def step(carry, _):
+            key, env_state, state, action = carry
+
+            # Step Environment
+            key, subkey = jax.random.split(key, 2)
+            next_state, env_state, reward, done, info = vmap_step(
+                args.num_environments
+            )(subkey, env_state, action)
+
+            # Get next actions
+            q_values = jax.vmap(model)(next_state)
+            key, subkey = jax.random.split(key, 2)
+            next_action = epsilon_greedy(subkey, epsilon, q_values)
+
+            transition = Transition(
+                state=state,
+                action=action,
+                reward=reward,
+                next_state=next_state,
+                next_action=next_action,
+                done=done,
+            )
+
+            return (key, env_state, next_state, next_action), (transition, info)
+
+        # Reset Environment
         key, subkey = jax.random.split(key, 2)
-        next_state, env_state, reward, done, info = vmap_step(args.num_environments)(
-            subkey, env_state, action
+        state, env_state = vmap_reset(args.num_environments)(subkey)
+
+        # Get first actions
+        q_values = jax.vmap(model)(state)
+        key, subkey = jax.random.split(key, 2)
+        action = epsilon_greedy(subkey, args.epsilon_start, q_values)
+
+        key, subkey = jax.random.split(key, 2)
+        carry = (key, env_state, state, action)
+
+        final_outs, intermediate_values = jax.lax.scan(
+            step, carry, None, args.num_steps
         )
 
-        # Get next actions
-        q_values = jax.vmap(model)(next_state)
-        key, subkey = jax.random.split(key, 2)
-        next_action = epsilon_greedy(subkey, args.epsilon_start, q_values)
+        ### TODO: Compute Loss and Update Model
 
-        transition = Transition(
-            state=state,
-            action=action,
-            reward=reward,
-            next_state=next_state,
-            next_action=next_action,
-            done=done
-        )
-
-        return (key, env_state, next_state, next_action), (transition, info)
-
-    key, subkey = jax.random.split(key, 2)
-    carry = (key, env_state, state, action)
-    final_outs, intermediate_values = jax.lax.scan(step, carry, None, args.num_steps)
-
-    return final_outs, intermediate_values
-    ### TODO: Compute Loss and Update Model
+    return 0, 1
 
 
 if __name__ == "__main__":
@@ -131,4 +150,3 @@ if __name__ == "__main__":
     print("Starting Run")
     compiled_run = jax.jit(run)
     item1, item2 = compiled_run(args)
-
