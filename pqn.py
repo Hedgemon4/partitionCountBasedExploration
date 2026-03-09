@@ -74,8 +74,11 @@ def make_env(environment_name):
     return env, vmap_reset, vmap_step, env_params
 
 
-def loss(model, states, target):
-    q_values = model(states)
+def loss(model, states, actions, targets):
+    q_values = jax.vmap(model)(states)
+    index = jnp.arange(q_values.shape[0])
+    selected_q_values = q_values[index, actions]
+    return jnp.mean((selected_q_values - targets) ** 2)
 
 
 def run(args: Args):
@@ -162,6 +165,46 @@ def run(args: Args):
 
         targets = jax.vmap(targets, in_axes=(0, None))(transitions, args.gamma)
 
+        def epoch(carry, _):
+            rng, transitions, targets = carry
+
+            # Shuffle data
+            def process_data(x, rng):
+                x = x.reshape(-1, *x.shape[2:])
+                x = jax.random.permutation(rng, x)
+                return x.reshape(args.num_minibatches, -1, *x.shape[1:])
+
+            # Using the same key will make sure data is shuffled in the same way across all fields
+            key, subkey = jax.random.split(rng, 2)
+            minibatches = jax.tree_util.tree_map(
+                lambda x: process_data(x, rng), transitions
+            )
+            targets = jax.tree_util.tree_map(process_data, targets, subkey)
+            params, static = eqx.partition(model, eqx.is_array)
+
+            # Compute the loss and update the model
+            def update_model(carry, batch):
+                model_params, optimizer_state = carry
+                model = eqx.combine(model_params, static)
+                mini_batch, targets = batch
+                loss_value, grads = eqx.filter_value_and_grad(loss)(
+                    model, mini_batch.state, mini_batch.action, targets
+                )
+                updates, optimizer_state = optim.update(
+                    grads, optimizer_state, eqx.filter(model, eqx.is_array)
+                )
+                model = eqx.apply_updates(model, updates)
+                params, _ = eqx.partition(model, eqx.is_array)
+                return (params, optimizer_state), (loss_value, grads)
+
+            jax.lax.scan(
+                update_model, (params, optimizer_state), (minibatches, targets)
+            )
+
+        key, subkey = jax.random.split(key, 2)
+        epoch((subkey, transitions, targets), None)
+
+        step_number += 1
         return transitions, infos
 
     return train_step(key, step_number)
