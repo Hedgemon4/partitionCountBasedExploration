@@ -11,4 +11,6 @@ def epsilon_greedy(random_key, epsilon, q_values):
         action_key, shape=max_action.shape, minval=0, maxval=q_values.shape[-1]
     )
     action_selection = jnp.where(epsilon_matrix < epsilon, random_action, max_action)
-    return action_selection
+    batch_indices = jnp.arange(q_values.shape[0])
+    selected_q_values = q_values[batch_indices, action_selection]
+    return action_selection, selected_q_values

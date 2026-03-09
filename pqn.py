@@ -21,6 +21,9 @@ class Args:
     epsilon_start = 1.0
     epsilon_end = 0.01
     epsilon_decay = 0.1
+    num_epochs = 2
+    num_minibatches = 4
+    gamma = 0.99
 
 
 @chex.dataclass(frozen=True)
@@ -28,8 +31,10 @@ class Transition:
     state: chex.Array
     action: chex.Array
     reward: chex.Array
+    q_value: chex.Array
     next_state: chex.Array
     next_action: chex.Array
+    next_q_value: chex.Array
     done: chex.Array
 
 
@@ -69,6 +74,10 @@ def make_env(environment_name):
     return env, vmap_reset, vmap_step, env_params
 
 
+def loss(model, states, target):
+    q_values = model(states)
+
+
 def run(args: Args):
     key = jax.random.PRNGKey(args.seed)
 
@@ -100,7 +109,7 @@ def run(args: Args):
 
         ### TODO: Step Environments
         def step(carry, _):
-            key, env_state, state, action = carry
+            key, env_state, state, action, q_value = carry
 
             # Step Environment
             key, subkey = jax.random.split(key, 2)
@@ -109,20 +118,22 @@ def run(args: Args):
             )(subkey, env_state, action)
 
             # Get next actions
-            q_values = jax.vmap(model)(next_state)
+            next_q_values = jax.vmap(model)(next_state)
             key, subkey = jax.random.split(key, 2)
-            next_action = epsilon_greedy(subkey, epsilon, q_values)
+            next_action, next_q = epsilon_greedy(subkey, epsilon, next_q_values)
 
             transition = Transition(
                 state=state,
                 action=action,
                 reward=reward,
+                q_value=q_value,
                 next_state=next_state,
                 next_action=next_action,
+                next_q_value=next_q,
                 done=done,
             )
 
-            return (key, env_state, next_state, next_action), (transition, info)
+            return (key, env_state, next_state, next_action, next_q), (transition, info)
 
         # Reset Environment
         key, subkey = jax.random.split(key, 2)
@@ -131,18 +142,29 @@ def run(args: Args):
         # Get first actions
         q_values = jax.vmap(model)(state)
         key, subkey = jax.random.split(key, 2)
-        action = epsilon_greedy(subkey, args.epsilon_start, q_values)
+        action, selected_q = epsilon_greedy(subkey, args.epsilon_start, q_values)
 
         key, subkey = jax.random.split(key, 2)
-        carry = (key, env_state, state, action)
+        carry = (key, env_state, state, action, selected_q)
 
         final_outs, intermediate_values = jax.lax.scan(
             step, carry, None, args.num_steps
         )
 
-        ### TODO: Compute Loss and Update Model
+        transitions, infos = intermediate_values
 
-    return 0, 1
+        # Compute Targets
+        def targets(transition, gamma):
+            return (
+                transition.reward
+                + (1 - transition.done) * gamma * transition.next_q_value
+            )
+
+        targets = jax.vmap(targets, in_axes=(0, None))(transitions, args.gamma)
+
+        return transitions, infos
+
+    return train_step(key, step_number)
 
 
 if __name__ == "__main__":
