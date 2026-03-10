@@ -8,6 +8,7 @@ import chex
 from jaxtyping import Array, Float, Int, PyTree
 
 from exploration import epsilon_greedy
+from wrappers import FlattenObservationWrapper, LogWrapper
 
 
 @chex.dataclass(frozen=True)
@@ -63,6 +64,8 @@ class QNetwork(eqx.Module):
 
 def make_env(environment_name):
     env, env_params = gymnax.make(environment_name)
+    env = FlattenObservationWrapper(env)
+    env = LogWrapper(env)
     vmap_reset = lambda num_envs: lambda random_key: jax.vmap(
         env.reset, in_axes=(0, None)
     )(jax.random.split(random_key, num_envs), env_params)
