@@ -63,7 +63,6 @@ class QNetwork(eqx.Module):
 
 def make_env(environment_name):
     env, env_params = gymnax.make(environment_name)
-
     vmap_reset = lambda num_envs: lambda random_key: jax.vmap(
         env.reset, in_axes=(0, None)
     )(jax.random.split(random_key, num_envs), env_params)
@@ -120,7 +119,7 @@ def run(args: Args):
             next_state, env_state, reward, done, info = vmap_step(
                 args.num_environments
             )(subkey, env_state, action)
-
+            jax.debug.print("Single env info: {}", info)
             # Get next actions
             next_q_values = jax.vmap(model)(next_state)
             key, subkey = jax.random.split(key, 2)
@@ -198,13 +197,13 @@ def run(args: Args):
                 )
                 model = eqx.apply_updates(model, updates)
                 params, _ = eqx.partition(model, eqx.is_array)
-                return (params, optimizer_state), (loss_value, grads)
+                return (params, optimizer_state), (loss_value)
 
             updates, metrics = jax.lax.scan(
                 update_model, (params, optimizer_state), (minibatches, targets)
             )
             updated_params, updated_optimizer = updates
-
+            jax.debug.print("Metrics: {}", metrics)
             return (next_rng, updated_params, updated_optimizer), metrics
 
         # Handle key split
