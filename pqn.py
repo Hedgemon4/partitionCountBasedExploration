@@ -17,7 +17,7 @@ class Args:
     environment = "CartPole-v1"
     num_environments = 32
     num_steps = 32
-    total_training_steps = 5e7
+    total_training_steps = 10
     epsilon_start = 1.0
     epsilon_end = 0.01
     epsilon_decay = 0.1
@@ -92,7 +92,7 @@ def run(args: Args):
     model = QNetwork(input_size=4, num_actions=2, key=subkey)
     optim = optax.adam(args.learning_rate)
 
-    optimizer_state = optim.init(eqx.filter(model, eqx.is_array))
+    opt_state = optim.init(eqx.filter(model, eqx.is_array))
 
     num_epsilon_decay_steps = (
         args.total_training_steps // args.num_environments // args.num_steps
@@ -107,7 +107,8 @@ def run(args: Args):
 
     step_number = 0
 
-    def train_step(key, step_number):
+    def train_step(carry, _):
+        key, step_number = carry
         epsilon = epsilon_schedule(step_number)
 
         ### TODO: Step Environments
@@ -163,10 +164,14 @@ def run(args: Args):
                 + (1 - transition.done) * gamma * transition.next_q_value
             )
 
-        targets = jax.vmap(targets, in_axes=(0, None))(transitions, args.gamma)
+        update_targets = jax.vmap(targets, in_axes=(0, None))(transitions, args.gamma)
+
+        # Split network for eqx
+        network_params, static = eqx.partition(model, eqx.is_array)
 
         def epoch(carry, _):
-            rng, transitions, targets = carry
+            rng, params, optimizer_state = carry
+            next_rng, epoch_rng = jax.random.split(rng, 2)
 
             # Shuffle data
             def process_data(x, rng):
@@ -175,12 +180,10 @@ def run(args: Args):
                 return x.reshape(args.num_minibatches, -1, *x.shape[1:])
 
             # Using the same key will make sure data is shuffled in the same way across all fields
-            key, subkey = jax.random.split(rng, 2)
             minibatches = jax.tree_util.tree_map(
-                lambda x: process_data(x, rng), transitions
+                lambda x: process_data(x, epoch_rng), transitions
             )
-            targets = jax.tree_util.tree_map(process_data, targets, subkey)
-            params, static = eqx.partition(model, eqx.is_array)
+            targets = jax.tree_util.tree_map(process_data, update_targets, epoch_rng)
 
             # Compute the loss and update the model
             def update_model(carry, batch):
@@ -197,17 +200,26 @@ def run(args: Args):
                 params, _ = eqx.partition(model, eqx.is_array)
                 return (params, optimizer_state), (loss_value, grads)
 
-            jax.lax.scan(
+            updates, metrics = jax.lax.scan(
                 update_model, (params, optimizer_state), (minibatches, targets)
             )
+            updated_params, updated_optimizer = updates
 
-        key, subkey = jax.random.split(key, 2)
-        epoch((subkey, transitions, targets), None)
+            return (next_rng, updated_params, updated_optimizer), metrics
 
+        # Handle key split
+        epoch_outs, epoch_metrics = jax.lax.scan(
+            epoch, (subkey, network_params, opt_state), None, args.num_epochs
+        )
+        epoch_key, epoch_params, epoch_opt_state = epoch_outs
         step_number += 1
-        return transitions, infos
 
-    return train_step(key, step_number)
+        return (epoch_key, step_number), (epoch_metrics, infos)
+
+    # training_information, update_information = jax.lax.scan(train_step,(key, step_number), None, args.total_training_steps)
+    # item1, item2 = train_step((key, step_number), None)
+    item1, item2 = train_step((key, step_number), None)
+    return (item1, item2)
 
 
 if __name__ == "__main__":
@@ -215,3 +227,6 @@ if __name__ == "__main__":
     print("Starting Run")
     compiled_run = jax.jit(run)
     item1, item2 = compiled_run(args)
+    metrics, info = item2
+    print(info)
+    print("Finished Run")
