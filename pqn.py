@@ -13,17 +13,18 @@ from wrappers import FlattenObservationWrapper, LogWrapper
 
 @chex.dataclass(frozen=True)
 class Args:
-    seed = 1
-    learning_rate = 1e-3
+    seed = 23
+    learning_rate = 1e-4
     environment = "CartPole-v1"
     num_environments = 32
-    num_steps = 32
-    total_training_steps = 10000
+    num_steps = 64
+    total_time_steps = 5e5
     epsilon_start = 1.0
-    epsilon_end = 0.01
-    epsilon_decay = 0.1
-    num_epochs = 2
-    num_minibatches = 4
+    epsilon_end = 0.2
+    epsilon_decay = 0.2
+    num_epochs = 4
+    num_minibatches = 16
+    hidden_size = 256
     gamma = 0.99
 
 
@@ -42,18 +43,18 @@ class Transition:
 class QNetwork(eqx.Module):
     layers: list
 
-    def __init__(self, input_size, num_actions, key):
+    def __init__(self, input_size, num_actions, hidden_size, key):
         key1, key2, key3 = jax.random.split(key, 3)
 
-        # Might need to transpose for atari
+        ### TODO: Might need to transpose for atari
         self.layers = [
-            eqx.nn.Linear(in_features=input_size, out_features=128, key=key1),
-            eqx.nn.LayerNorm(128),
+            eqx.nn.Linear(in_features=input_size, out_features=hidden_size, key=key1),
+            eqx.nn.LayerNorm(hidden_size),
             jax.nn.relu,
-            eqx.nn.Linear(in_features=128, out_features=64, key=key2),
-            eqx.nn.LayerNorm(64),
+            eqx.nn.Linear(in_features=hidden_size, out_features=hidden_size, key=key2),
+            eqx.nn.LayerNorm(hidden_size),
             jax.nn.relu,
-            eqx.nn.Linear(in_features=64, out_features=num_actions, key=key3),
+            eqx.nn.Linear(in_features=hidden_size, out_features=num_actions, key=key3),
         ]
 
     def __call__(self, x):
@@ -91,20 +92,38 @@ def run(args: Args):
 
     # Network Setup
     key, subkey = jax.random.split(key, 2)
-    initial_model = QNetwork(input_size=4, num_actions=2, key=subkey)
+    initial_model = QNetwork(
+        input_size=4, num_actions=2, hidden_size=args.hidden_size, key=subkey
+    )
     optim = optax.adam(args.learning_rate)
 
     opt_state = optim.init(eqx.filter(initial_model, eqx.is_array))
 
-    num_epsilon_decay_steps = (
-        args.total_training_steps // args.num_environments // args.num_steps
-    )
+    num_updates = int(args.total_time_steps // args.num_environments // args.num_steps)
 
     # Epsilon Decay Setup
     epsilon_schedule = optax.linear_schedule(
         init_value=args.epsilon_start,
         end_value=args.epsilon_end,
-        transition_steps=num_epsilon_decay_steps,
+        transition_steps=num_updates,
+    )
+
+    # Reset Environment
+    key, subkey = jax.random.split(key, 2)
+    start_state, start_env_state = vmap_reset(args.num_environments)(subkey)
+
+    # Get first actions
+    initial_q_values = jax.vmap(initial_model)(start_state)
+    key, subkey = jax.random.split(key, 2)
+    initial_action, initial_selected_q = epsilon_greedy(
+        subkey, args.epsilon_start, initial_q_values
+    )
+    initial_env_carry = (
+        key,
+        start_env_state,
+        start_state,
+        initial_action,
+        initial_selected_q,
     )
 
     step_number = 0
@@ -114,19 +133,19 @@ def run(args: Args):
     dynamic_params, static = eqx.partition(initial_model, eqx.is_array)
 
     def train_step(carry, _):
-        key, step_number, env_step, carry_params = carry
+        key, step_number, env_step, env_carry, carry_params = carry
         epsilon = epsilon_schedule(step_number)
         model = eqx.combine(carry_params, static)
 
-        ### TODO: Step Environments
+        # Step env
         def step(carry, _):
-            key, env_state, state, action, q_value = carry
+            key, step_env_state, state, action, q_value = carry
 
             # Step Environment
             key, subkey = jax.random.split(key, 2)
-            next_state, env_state, reward, done, info = vmap_step(
+            next_state, step_env_state, reward, done, info = vmap_step(
                 args.num_environments
-            )(subkey, env_state, action)
+            )(subkey, step_env_state, action)
             # Get next actions
             next_q_values = jax.vmap(model)(next_state)
             key, subkey = jax.random.split(key, 2)
@@ -143,22 +162,13 @@ def run(args: Args):
                 done=done,
             )
 
-            return (key, env_state, next_state, next_action, next_q), (transition, info)
+            return (key, step_env_state, next_state, next_action, next_q), (
+                transition,
+                info,
+            )
 
-        # Reset Environment
-        key, subkey = jax.random.split(key, 2)
-        state, env_state = vmap_reset(args.num_environments)(subkey)
-
-        # Get first actions
-        q_values = jax.vmap(model)(state)
-        key, subkey = jax.random.split(key, 2)
-        action, selected_q = epsilon_greedy(subkey, args.epsilon_start, q_values)
-
-        key, subkey = jax.random.split(key, 2)
-        carry = (key, env_state, state, action, selected_q)
-
-        final_outs, intermediate_values = jax.lax.scan(
-            step, carry, None, args.num_steps
+        final_env_carry, intermediate_values = jax.lax.scan(
+            step, env_carry, None, args.num_steps
         )
         env_step += args.num_steps * args.num_environments
 
@@ -187,10 +197,13 @@ def run(args: Args):
                 return x.reshape(args.num_minibatches, -1, *x.shape[1:])
 
             # Using the same key will make sure data is shuffled in the same way across all fields
+
             minibatches = jax.tree_util.tree_map(
                 lambda x: process_data(x, epoch_rng), transitions
             )
-            targets = jax.tree_util.tree_map(process_data, update_targets, epoch_rng)
+            targets = jax.tree_util.tree_map(
+                lambda x: process_data(x, epoch_rng), update_targets
+            )
 
             # Compute the loss and update the model
             def update_model(carry, batch):
@@ -227,15 +240,16 @@ def run(args: Args):
         }
         metrics.update({k: v.mean() for k, v in infos.items()})
 
-        return (epoch_key, step_number, env_step, epoch_params), metrics
+        return (
+            epoch_key,
+            step_number,
+            env_step,
+            final_env_carry,
+            epoch_params,
+        ), metrics
 
-    # training_information, update_information = jax.lax.scan(train_step,(key, step_number), None, args.total_training_steps)
-    # item1, item2 = train_step((key, step_number), None)
-    training_carry = (key, step_number, env_step, dynamic_params)
-    # item1, item2 = train_step(training_carry, None)
-    item1, item2 = jax.lax.scan(
-        train_step, training_carry, None, args.total_training_steps
-    )
+    training_carry = (key, step_number, env_step, initial_env_carry, dynamic_params)
+    item1, item2 = jax.lax.scan(train_step, training_carry, None, num_updates)
     return (item1, item2)
 
 
@@ -245,5 +259,7 @@ if __name__ == "__main__":
     compiled_run = jax.jit(run)
     item1, item2 = compiled_run(args)
     metrics = item2
-    print(metrics["returned_episode_returns"][-1])
+    print(jnp.max(metrics["returned_episode_returns"]))
+    print(jnp.max(metrics["returned_episode_lengths"]))
+    print(metrics.keys())
     print("Finished Run")
