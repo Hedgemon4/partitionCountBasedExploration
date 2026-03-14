@@ -108,6 +108,8 @@ def run(args: Args):
         transition_steps=num_updates,
     )
 
+    ### TODO: Add learning rate decay as well
+
     # Reset Environment
     key, subkey = jax.random.split(key, 2)
     start_state, start_env_state = vmap_reset(args.num_environments)(subkey)
@@ -240,6 +242,14 @@ def run(args: Args):
         }
         metrics.update({k: v.mean() for k, v in infos.items()})
 
+        # This just makes sure that the lengths and returns are only averaged for episodes which ended
+        for k, v in infos.items():
+            if k == "returned_episode_returns" or k == "returned_episode_lengths":
+                mask = infos["returned_episode"]
+                sum_val = jnp.sum(v * mask)
+                count = jnp.sum(mask)
+                metrics["test_" + k] = jnp.where(count > 0, sum_val / count, 0.0)
+
         return (
             epoch_key,
             step_number,
@@ -259,7 +269,9 @@ if __name__ == "__main__":
     compiled_run = jax.jit(run)
     item1, item2 = compiled_run(args)
     metrics = item2
-    print(jnp.max(metrics["returned_episode_returns"]))
-    print(jnp.max(metrics["returned_episode_lengths"]))
+
+    ### TODO: Add better logging of results
+    print(metrics["test_returned_episode_returns"])
+    print(metrics["test_returned_episode_lengths"])
     print(metrics.keys())
     print("Finished Run")
