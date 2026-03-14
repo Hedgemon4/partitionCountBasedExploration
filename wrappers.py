@@ -85,7 +85,7 @@ class LogWrapper(GymnaxWrapper):
             episode_lengths=0,
             returned_episode_returns=0,
             returned_episode_lengths=0,
-            timestep=0
+            timestep=0,
         )
         return obs, state
 
