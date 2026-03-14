@@ -89,6 +89,7 @@ def run(args: Args):
 
     # Environment Setup
     env, vmap_reset, vmap_step, env_params = make_env(args.environment)
+    ### TODO: Add support for non-gymnax environments
 
     # Network Setup
     key, subkey = jax.random.split(key, 2)
