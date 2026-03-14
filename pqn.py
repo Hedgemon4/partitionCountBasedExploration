@@ -93,6 +93,7 @@ def run(args: Args):
 
     # Network Setup
     key, subkey = jax.random.split(key, 2)
+    ### TODO: Don't hardcode input size and action nums
     initial_model = QNetwork(
         input_size=4, num_actions=2, hidden_size=args.hidden_size, key=subkey
     )
@@ -183,6 +184,8 @@ def run(args: Args):
                 transition.reward
                 + (1 - transition.done) * gamma * transition.next_q_value
             )
+
+        ### TODO: Add lambda returns
 
         update_targets = jax.vmap(targets, in_axes=(0, None))(transitions, args.gamma)
 
