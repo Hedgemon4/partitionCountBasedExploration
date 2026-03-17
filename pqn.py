@@ -1,6 +1,7 @@
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 import optax
 import tyro
 import gymnax
@@ -14,7 +15,8 @@ from wrappers import FlattenObservationWrapper, LogWrapper
 @chex.dataclass(frozen=True)
 class Args:
     seed = 23
-    learning_rate = 1e-4
+    initial_learning_rate = 1e-4
+    final_learning_rate = 1e-20
     environment = "CartPole-v1"
     num_environments = 32
     num_steps = 64
@@ -26,6 +28,8 @@ class Args:
     num_minibatches = 16
     hidden_size = 256
     gamma = 0.99
+    use_lambda_returns = True
+    lam = 0.95
 
 
 @chex.dataclass(frozen=True)
@@ -87,6 +91,8 @@ def loss(model, states, actions, targets):
 def run(args: Args):
     key = jax.random.PRNGKey(args.seed)
 
+    num_updates = int(args.total_time_steps // args.num_environments // args.num_steps)
+
     # Environment Setup
     env, vmap_reset, vmap_step, env_params = make_env(args.environment)
     ### TODO: Add support for non-gymnax environments
@@ -97,11 +103,18 @@ def run(args: Args):
     initial_model = QNetwork(
         input_size=4, num_actions=2, hidden_size=args.hidden_size, key=subkey
     )
-    optim = optax.adam(args.learning_rate)
+
+    optim = optax.adam(
+        args.initial_learning_rate
+        if args.initial_learning_rate == args.final_learning_rate
+        else optax.linear_schedule(
+            init_value=args.initial_learning_rate,
+            end_value=args.final_learning_rate,
+            transition_steps=num_updates * args.num_epochs * args.num_minibatches,
+        )
+    )
 
     opt_state = optim.init(eqx.filter(initial_model, eqx.is_array))
-
-    num_updates = int(args.total_time_steps // args.num_environments // args.num_steps)
 
     # Epsilon Decay Setup
     epsilon_schedule = optax.linear_schedule(
@@ -179,15 +192,36 @@ def run(args: Args):
         transitions, infos = intermediate_values
 
         # Compute Targets
-        def targets(transition, gamma):
-            return (
-                transition.reward
-                + (1 - transition.done) * gamma * transition.next_q_value
+        if args.use_lambda_returns:
+
+            def lambda_targets(carry, transition):
+                target = carry
+                updated_target = transition.reward + (
+                    1 - transition.done
+                ) * args.gamma * (
+                    args.lam * target + (1 - args.lam) * transition.next_q_value
+                )
+                return updated_target, updated_target
+
+            # Want to compute the targets. Each target will have the final q value in it, so we can start with that
+            all_but_last_transitions = jax.tree.map(lambda x: x[:-1], transitions)
+            lambda_returns = transitions.q_value[-1, :]
+            carry = lambda_returns
+            final_target_carry, targets = jax.lax.scan(
+                lambda_targets, carry, all_but_last_transitions, reverse=True
             )
+            update_targets = jnp.concatenate((targets, lambda_returns[np.newaxis]))
+        else:
 
-        ### TODO: Add lambda returns
+            def targets(transition, gamma):
+                return (
+                    transition.reward
+                    + (1 - transition.done) * gamma * transition.next_q_value
+                )
 
-        update_targets = jax.vmap(targets, in_axes=(0, None))(transitions, args.gamma)
+            update_targets = jax.vmap(targets, in_axes=(0, None))(
+                transitions, args.gamma
+            )
 
         # Split network for eqx
         network_params, _ = eqx.partition(model, eqx.is_array)
@@ -238,6 +272,9 @@ def run(args: Args):
         )
         epoch_key, epoch_params, epoch_opt_state = epoch_outs
         step_number += 1
+
+        ### TODO: Compute episode return metrics based on discussion with Mike
+
         metrics = {
             "env_step": env_step,
             "update_steps": step_number,
