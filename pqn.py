@@ -30,6 +30,8 @@ class Args:
     gamma = 0.99
     use_lambda_returns = True
     lam = 0.95
+    max_grad_norm = 10000.0
+    ema_alpha = 2 / (30 + 1)
 
 
 @chex.dataclass(frozen=True)
@@ -104,14 +106,17 @@ def run(args: Args):
         input_size=4, num_actions=2, hidden_size=args.hidden_size, key=subkey
     )
 
-    optim = optax.adam(
-        args.initial_learning_rate
-        if args.initial_learning_rate == args.final_learning_rate
-        else optax.linear_schedule(
-            init_value=args.initial_learning_rate,
-            end_value=args.final_learning_rate,
-            transition_steps=num_updates * args.num_epochs * args.num_minibatches,
-        )
+    optim = optax.chain(
+        optax.clip_by_global_norm(args.max_grad_norm),
+        optax.adam(
+            args.initial_learning_rate
+            if args.initial_learning_rate == args.final_learning_rate
+            else optax.linear_schedule(
+                init_value=args.initial_learning_rate,
+                end_value=args.final_learning_rate,
+                transition_steps=num_updates * args.num_epochs * args.num_minibatches,
+            )
+        ),
     )
 
     opt_state = optim.init(eqx.filter(initial_model, eqx.is_array))
@@ -143,6 +148,10 @@ def run(args: Args):
         initial_selected_q,
     )
 
+    episode_return_ema = 0.0
+    episode_length_ema = 0.0
+    episode_metrics = (episode_return_ema, episode_length_ema)
+
     step_number = 0
     env_step = 0
 
@@ -150,7 +159,9 @@ def run(args: Args):
     dynamic_params, static = eqx.partition(initial_model, eqx.is_array)
 
     def train_step(carry, _):
-        key, step_number, env_step, env_carry, carry_params = carry
+        key, step_number, env_step, env_carry, carry_params, train_episode_metrics = (
+            carry
+        )
         epsilon = epsilon_schedule(step_number)
         model = eqx.combine(carry_params, static)
 
@@ -283,13 +294,36 @@ def run(args: Args):
         }
         metrics.update({k: v.mean() for k, v in infos.items()})
 
-        # This just makes sure that the lengths and returns are only averaged for episodes which ended
-        for k, v in infos.items():
-            if k == "returned_episode_returns" or k == "returned_episode_lengths":
-                mask = infos["returned_episode"]
-                sum_val = jnp.sum(v * mask)
-                count = jnp.sum(mask)
-                metrics["test_" + k] = jnp.where(count > 0, sum_val / count, 0.0)
+        # Compute EMA of episode returns and lengths
+
+        is_done = infos["returned_episode"]
+        episode_returns = infos["returned_episode_returns"]
+        episode_lengths = infos["returned_episode_lengths"]
+        num_dones = is_done.sum()
+
+        returns_ema, lengths_ema = train_episode_metrics
+
+        mean_episode_return = jnp.sum(is_done * episode_returns) / jnp.maximum(
+            num_dones, 1
+        )
+        effective_alpha = 1 - (1 - args.ema_alpha) ** num_dones
+        updated_returns_ema = jnp.where(
+            num_dones > 0,
+            returns_ema + effective_alpha * (mean_episode_return - returns_ema),
+            returns_ema,
+        )
+
+        mean_episode_length = jnp.sum(is_done * episode_lengths) / jnp.maximum(
+            num_dones, 1
+        )
+        updated_episode_lengths_ema = jnp.where(
+            num_dones > 0,
+            lengths_ema + effective_alpha * (mean_episode_length - lengths_ema),
+            lengths_ema,
+        )
+
+        metrics["moving_avg_return"] = updated_returns_ema
+        metrics["moving_avg_length"] = updated_episode_lengths_ema
 
         return (
             epoch_key,
@@ -297,11 +331,18 @@ def run(args: Args):
             env_step,
             final_env_carry,
             epoch_params,
+            (updated_returns_ema, updated_episode_lengths_ema),
         ), metrics
 
-    training_carry = (key, step_number, env_step, initial_env_carry, dynamic_params)
-    item1, item2 = jax.lax.scan(train_step, training_carry, None, num_updates)
-    return (item1, item2)
+    training_carry = (
+        key,
+        step_number,
+        env_step,
+        initial_env_carry,
+        dynamic_params,
+        episode_metrics,
+    )
+    return jax.lax.scan(train_step, training_carry, None, num_updates)
 
 
 if __name__ == "__main__":
@@ -312,7 +353,6 @@ if __name__ == "__main__":
     metrics = item2
 
     ### TODO: Add better logging of results
-    print(metrics["test_returned_episode_returns"])
-    print(metrics["test_returned_episode_lengths"])
-    print(metrics.keys())
+    print(metrics["moving_avg_return"])
+    print(metrics["moving_avg_length"])
     print("Finished Run")
