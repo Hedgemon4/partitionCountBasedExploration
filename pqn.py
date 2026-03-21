@@ -6,7 +6,6 @@ import optax
 import tyro
 import gymnax
 import chex
-from jaxtyping import Array, Float, Int, PyTree
 
 from exploration import epsilon_greedy
 from wrappers import FlattenObservationWrapper, LogWrapper
@@ -14,24 +13,25 @@ from wrappers import FlattenObservationWrapper, LogWrapper
 
 @chex.dataclass(frozen=True)
 class Args:
-    seed = 23
-    initial_learning_rate = 1e-4
-    final_learning_rate = 1e-20
-    environment = "CartPole-v1"
-    num_environments = 32
-    num_steps = 64
-    total_time_steps = 5e5
-    epsilon_start = 1.0
-    epsilon_end = 0.2
-    epsilon_decay = 0.2
-    num_epochs = 4
-    num_minibatches = 16
-    hidden_size = 256
-    gamma = 0.99
-    use_lambda_returns = True
-    lam = 0.95
-    max_grad_norm = 10000.0
-    ema_alpha = 2 / (30 + 1)
+    seed: int = 1
+    initial_learning_rate: float = 1e-4
+    final_learning_rate: float = 1e-20
+    environment: str = "CartPole-v1"
+    num_environments: int = 32
+    num_steps: int = 64
+    total_time_steps: int = 5e5
+    epsilon_start: float = 1.0
+    epsilon_end: float = 0.2
+    epsilon_decay: float = 0.2
+    num_epochs: int = 4
+    num_minibatches: int = 16
+    hidden_size: int = 256
+    gamma: float = 0.99
+    lambda_returns: bool = True
+    lam: float = 0.95
+    max_grad_norm: float = 10.0
+    num_episodes_for_average: int = 30
+    learnable_norm_params: bool = True
 
 
 @chex.dataclass(frozen=True)
@@ -55,10 +55,18 @@ class QNetwork(eqx.Module):
         ### TODO: Might need to transpose for atari
         self.layers = [
             eqx.nn.Linear(in_features=input_size, out_features=hidden_size, key=key1),
-            eqx.nn.LayerNorm(hidden_size),
+            eqx.nn.LayerNorm(
+                hidden_size,
+                use_weight=args.learnable_norm_params,
+                use_bias=args.learnable_norm_params,
+            ),
             jax.nn.relu,
             eqx.nn.Linear(in_features=hidden_size, out_features=hidden_size, key=key2),
-            eqx.nn.LayerNorm(hidden_size),
+            eqx.nn.LayerNorm(
+                hidden_size,
+                use_weight=args.learnable_norm_params,
+                use_bias=args.learnable_norm_params,
+            ),
             jax.nn.relu,
             eqx.nn.Linear(in_features=hidden_size, out_features=num_actions, key=key3),
         ]
@@ -99,11 +107,16 @@ def run(args: Args):
     env, vmap_reset, vmap_step, env_params = make_env(args.environment)
     ### TODO: Add support for non-gymnax environments
 
+    input_size = int(env.observation_space(env_params).shape[0])
+    num_actions = int(env.action_space(env_params).n)
+
     # Network Setup
     key, subkey = jax.random.split(key, 2)
-    ### TODO: Don't hardcode input size and action nums
     initial_model = QNetwork(
-        input_size=4, num_actions=2, hidden_size=args.hidden_size, key=subkey
+        input_size=input_size,
+        num_actions=num_actions,
+        hidden_size=args.hidden_size,
+        key=subkey,
     )
 
     optim = optax.chain(
@@ -128,8 +141,6 @@ def run(args: Args):
         transition_steps=num_updates,
     )
 
-    ### TODO: Add learning rate decay as well
-
     # Reset Environment
     key, subkey = jax.random.split(key, 2)
     start_state, start_env_state = vmap_reset(args.num_environments)(subkey)
@@ -150,6 +161,7 @@ def run(args: Args):
 
     episode_return_ema = 0.0
     episode_length_ema = 0.0
+    ema_alpha = 2 / (args.num_episodes_for_average + 1)
     episode_metrics = (episode_return_ema, episode_length_ema)
 
     step_number = 0
@@ -203,7 +215,7 @@ def run(args: Args):
         transitions, infos = intermediate_values
 
         # Compute Targets
-        if args.use_lambda_returns:
+        if args.lambda_returns:
 
             def lambda_targets(carry, transition):
                 target = carry
@@ -306,7 +318,7 @@ def run(args: Args):
         mean_episode_return = jnp.sum(is_done * episode_returns) / jnp.maximum(
             num_dones, 1
         )
-        effective_alpha = 1 - (1 - args.ema_alpha) ** num_dones
+        effective_alpha = 1 - (1 - ema_alpha) ** num_dones
         updated_returns_ema = jnp.where(
             num_dones > 0,
             returns_ema + effective_alpha * (mean_episode_return - returns_ema),
@@ -348,7 +360,7 @@ def run(args: Args):
 if __name__ == "__main__":
     args = tyro.cli(Args)
     print("Starting Run")
-    compiled_run = jax.jit(run)
+    compiled_run = jax.jit(run, static_argnames=("args",))
     item1, item2 = compiled_run(args)
     metrics = item2
 
