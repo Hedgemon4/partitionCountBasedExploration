@@ -36,7 +36,7 @@ class Args:
     num_episodes_for_average: int = 30
     learnable_norm_params: bool = True
     eta = 2.0
-    bound = 20
+    bound = 20.0
 
 
 @chex.dataclass(frozen=True)
@@ -57,9 +57,7 @@ class QNetwork(eqx.Module):
     def __init__(self, input_size, num_actions, hidden_size, key):
         key1, key2, key3 = jax.random.split(key, 3)
         k = int(args.bound * args.eta / 2)
-        centres = jnp.linspace(-int(args.bound), int(args.bound - args.eta), k, dtype=jnp.int32)
-        jax.debug.print("centres {}", centres)
-        jax.debug.print("centres shape {}", centres[:, None].shape)
+        centres = args.eta * jnp.arange(k) - args.bound
         fuzzy_tiling = partial(activations.fta, centres=centres, eta=args.eta)
 
         ### TODO: Might need to transpose for atari
@@ -70,8 +68,9 @@ class QNetwork(eqx.Module):
                 use_weight=args.learnable_norm_params,
                 use_bias=args.learnable_norm_params,
             ),
-            jax.nn.relu,
-            eqx.nn.Linear(in_features=hidden_size, out_features=hidden_size, key=key2),
+            fuzzy_tiling,
+            eqx.nn.Lambda(jnp.ravel),
+            eqx.nn.Linear(in_features=k * hidden_size, out_features=hidden_size, key=key2),
             eqx.nn.LayerNorm(
                 hidden_size,
                 use_weight=args.learnable_norm_params,
