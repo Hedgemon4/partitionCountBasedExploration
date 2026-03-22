@@ -6,10 +6,13 @@ import jax
 
 
 def fta(x: ArrayLike, centres, eta) -> Array:
-    return 1 - fta_indicator(
-        jnp.maximum(centres - x, 0) + jnp.maximum(x - eta - centres, 0), eta
+    term1 = jnp.maximum(centres[None, :] - x[:, None], 0)
+    term2 = jnp.maximum(x[:, None] - eta - centres[None, :] , 0)
+    combined = term1 + term2
+    return 1.0 - fta_indicator(
+        combined, eta
     )
 
 
 def fta_indicator(x, eta):
-    return jnp.where(x < eta, x, 0) + jnp.where(x > eta, 1, 0)
+    return jnp.where(x <= eta, x, 0.0) + jnp.where(x > eta, 1.0, 0.0)
