@@ -40,7 +40,7 @@ class Args:
     reward_scale: float = 0.1
     num_episodes_for_average: int = 30
     learnable_norm_params: bool = True
-    sarsa_returns: bool = True
+    sarsa_returns: bool = False
     metrics_file_name: str = "pqn_fixed_sarsa.npz"
 
 
@@ -247,7 +247,7 @@ def make_run(args: Args):
 
             # Compute Targets
             if args.lambda_returns:
-
+                # TODO: These targets still might be wrong
                 def lambda_targets(carry, transition):
                     target, next_q = carry
                     updated_target = transition.reward + (
