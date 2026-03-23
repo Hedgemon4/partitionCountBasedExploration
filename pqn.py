@@ -1,3 +1,5 @@
+import time
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -13,8 +15,9 @@ from wrappers import FlattenObservationWrapper, LogWrapper
 
 @chex.dataclass(frozen=True)
 class Args:
-    seed: int = 1
-    initial_learning_rate: float = 1e-4
+    seed: int = 0
+    num_seeds: int = 30
+    initial_learning_rate: float = 0.0001
     final_learning_rate: float = 1e-20
     environment: str = "CartPole-v1"
     num_environments: int = 32
@@ -29,9 +32,11 @@ class Args:
     gamma: float = 0.99
     lambda_returns: bool = True
     lam: float = 0.95
-    max_grad_norm: float = 10.0
+    max_grad_norm: float = 10
+    reward_scale: float = 0.1
     num_episodes_for_average: int = 30
     learnable_norm_params: bool = True
+    metrics_file_name: str = "pqn_my_implementation_metrics.npz"
 
 
 @chex.dataclass(frozen=True)
@@ -95,12 +100,9 @@ def loss(model, states, actions, targets):
     q_values = jax.vmap(model)(states)
     index = jnp.arange(q_values.shape[0])
     selected_q_values = q_values[index, actions]
-    return jnp.mean((selected_q_values - targets) ** 2), selected_q_values
+    return 0.5 * jnp.mean((selected_q_values - targets) ** 2), selected_q_values
 
-
-def run(args: Args):
-    key = jax.random.PRNGKey(args.seed)
-
+def make_run(args: Args):
     num_updates = int(args.total_time_steps // args.num_environments // args.num_steps)
 
     # Environment Setup
@@ -110,261 +112,268 @@ def run(args: Args):
     input_size = int(env.observation_space(env_params).shape[0])
     num_actions = int(env.action_space(env_params).n)
 
-    # Network Setup
-    key, subkey = jax.random.split(key, 2)
-    initial_model = QNetwork(
-        input_size=input_size,
-        num_actions=num_actions,
-        hidden_size=args.hidden_size,
-        key=subkey,
-    )
-
-    optim = optax.chain(
-        optax.clip_by_global_norm(args.max_grad_norm),
-        optax.adam(
-            args.initial_learning_rate
-            if args.initial_learning_rate == args.final_learning_rate
-            else optax.linear_schedule(
-                init_value=args.initial_learning_rate,
-                end_value=args.final_learning_rate,
-                transition_steps=num_updates * args.num_epochs * args.num_minibatches,
-            )
-        ),
-    )
-
-    opt_state = optim.init(eqx.filter(initial_model, eqx.is_array))
-
-    # Epsilon Decay Setup
-    epsilon_schedule = optax.linear_schedule(
-        init_value=args.epsilon_start,
-        end_value=args.epsilon_end,
-        transition_steps=num_updates,
-    )
-
-    # Reset Environment
-    key, subkey = jax.random.split(key, 2)
-    start_state, start_env_state = vmap_reset(args.num_environments)(subkey)
-
-    # Get first actions
-    initial_q_values = jax.vmap(initial_model)(start_state)
-    key, subkey = jax.random.split(key, 2)
-    initial_action, initial_selected_q = epsilon_greedy(
-        subkey, args.epsilon_start, initial_q_values
-    )
-    initial_env_carry = (
-        key,
-        start_env_state,
-        start_state,
-        initial_action,
-        initial_selected_q,
-    )
-
-    episode_return_ema = 0.0
-    episode_length_ema = 0.0
-    ema_alpha = 2 / (args.num_episodes_for_average + 1)
-    episode_metrics = (episode_return_ema, episode_length_ema)
-
-    step_number = 0
-    env_step = 0
-
-    # Split network for eqx
-    dynamic_params, static = eqx.partition(initial_model, eqx.is_array)
-
-    def train_step(carry, _):
-        key, step_number, env_step, env_carry, carry_params, train_episode_metrics = (
-            carry
+    def run(key):
+        # Network Setup
+        key, subkey = jax.random.split(key, 2)
+        initial_model = QNetwork(
+            input_size=input_size,
+            num_actions=num_actions,
+            hidden_size=args.hidden_size,
+            key=subkey,
         )
-        epsilon = epsilon_schedule(step_number)
-        model = eqx.combine(carry_params, static)
 
-        # Step env
-        def step(carry, _):
-            key, step_env_state, state, action, q_value = carry
-
-            # Step Environment
-            key, subkey = jax.random.split(key, 2)
-            next_state, step_env_state, reward, done, info = vmap_step(
-                args.num_environments
-            )(subkey, step_env_state, action)
-            # Get next actions
-            next_q_values = jax.vmap(model)(next_state)
-            key, subkey = jax.random.split(key, 2)
-            next_action, next_q = epsilon_greedy(subkey, epsilon, next_q_values)
-
-            transition = Transition(
-                state=state,
-                action=action,
-                reward=reward,
-                q_value=q_value,
-                next_state=next_state,
-                next_action=next_action,
-                next_q_value=next_q,
-                done=done,
-            )
-
-            return (key, step_env_state, next_state, next_action, next_q), (
-                transition,
-                info,
-            )
-
-        final_env_carry, intermediate_values = jax.lax.scan(
-            step, env_carry, None, args.num_steps
+        optim = optax.chain(
+            optax.clip_by_global_norm(args.max_grad_norm),
+            optax.adam(
+                args.initial_learning_rate
+                if args.initial_learning_rate == args.final_learning_rate
+                else optax.linear_schedule(
+                    init_value=args.initial_learning_rate,
+                    end_value=args.final_learning_rate,
+                    transition_steps=num_updates * args.num_epochs * args.num_minibatches,
+                )
+            ),
         )
-        env_step += args.num_steps * args.num_environments
 
-        transitions, infos = intermediate_values
+        opt_state = optim.init(eqx.filter(initial_model, eqx.is_array))
 
-        # Compute Targets
-        if args.lambda_returns:
+        # Epsilon Decay Setup
+        epsilon_schedule = optax.linear_schedule(
+            init_value=args.epsilon_start,
+            end_value=args.epsilon_end,
+            transition_steps=num_updates,
+        )
 
-            def lambda_targets(carry, transition):
-                target = carry
-                updated_target = transition.reward + (
-                    1 - transition.done
-                ) * args.gamma * (
-                    args.lam * target + (1 - args.lam) * transition.next_q_value
-                )
-                return updated_target, updated_target
+        # Reset Environment
+        key, subkey = jax.random.split(key, 2)
+        start_state, start_env_state = vmap_reset(args.num_environments)(subkey)
 
-            # Want to compute the targets. Each target will have the final q value in it, so we can start with that
-            all_but_last_transitions = jax.tree.map(lambda x: x[:-1], transitions)
-            lambda_returns = transitions.q_value[-1, :]
-            carry = lambda_returns
-            final_target_carry, targets = jax.lax.scan(
-                lambda_targets, carry, all_but_last_transitions, reverse=True
-            )
-            update_targets = jnp.concatenate((targets, lambda_returns[np.newaxis]))
-        else:
+        # Get first actions
+        initial_q_values = jax.vmap(initial_model)(start_state)
+        key, subkey = jax.random.split(key, 2)
+        initial_action, initial_selected_q = epsilon_greedy(
+            subkey, args.epsilon_start, initial_q_values
+        )
+        initial_env_carry = (
+            key,
+            start_env_state,
+            start_state,
+            initial_action,
+            initial_selected_q,
+        )
 
-            def targets(transition, gamma):
-                return (
-                    transition.reward
-                    + (1 - transition.done) * gamma * transition.next_q_value
-                )
+        episode_return_ema = 0.0
+        episode_length_ema = 0.0
+        ema_alpha = 2 / (args.num_episodes_for_average + 1)
+        episode_metrics = (episode_return_ema, episode_length_ema)
 
-            update_targets = jax.vmap(targets, in_axes=(0, None))(
-                transitions, args.gamma
-            )
+        step_number = 0
+        env_step = 0
 
         # Split network for eqx
-        network_params, _ = eqx.partition(model, eqx.is_array)
+        dynamic_params, static = eqx.partition(initial_model, eqx.is_array)
 
-        def epoch(carry, _):
-            rng, params, optimizer_state = carry
-            next_rng, epoch_rng = jax.random.split(rng, 2)
-
-            # Shuffle data
-            def process_data(x, rng):
-                x = x.reshape(-1, *x.shape[2:])
-                x = jax.random.permutation(rng, x)
-                return x.reshape(args.num_minibatches, -1, *x.shape[1:])
-
-            # Using the same key will make sure data is shuffled in the same way across all fields
-
-            minibatches = jax.tree_util.tree_map(
-                lambda x: process_data(x, epoch_rng), transitions
+        def train_step(carry, _):
+            key, step_number, env_step, env_carry, carry_params, train_episode_metrics = (
+                carry
             )
-            targets = jax.tree_util.tree_map(
-                lambda x: process_data(x, epoch_rng), update_targets
-            )
+            epsilon = epsilon_schedule(step_number)
+            model = eqx.combine(carry_params, static)
 
-            # Compute the loss and update the model
-            def update_model(carry, batch):
-                model_params, optimizer_state = carry
-                model = eqx.combine(model_params, static)
-                mini_batch, targets = batch
-                (loss_value, loss_q_values), grads = eqx.filter_value_and_grad(
-                    loss, has_aux=True
-                )(model, mini_batch.state, mini_batch.action, targets)
-                updates, optimizer_state = optim.update(
-                    grads, optimizer_state, eqx.filter(model, eqx.is_array)
+            # Step env
+            def step(carry, _):
+                key, step_env_state, state, action, q_value = carry
+
+                # Step Environment
+                key, subkey = jax.random.split(key, 2)
+                next_state, step_env_state, reward, done, info = vmap_step(
+                    args.num_environments
+                )(subkey, step_env_state, action)
+                # Get next actions
+                next_q_values = jax.vmap(model)(next_state)
+                key, subkey = jax.random.split(key, 2)
+                next_action, next_q = epsilon_greedy(subkey, epsilon, next_q_values)
+                scaled_reward = reward * args.reward_scale
+
+                transition = Transition(
+                    state=state,
+                    action=action,
+                    reward=scaled_reward,
+                    q_value=q_value,
+                    next_state=next_state,
+                    next_action=next_action,
+                    next_q_value=next_q,
+                    done=done,
                 )
-                model = eqx.apply_updates(model, updates)
-                params, _ = eqx.partition(model, eqx.is_array)
-                return (params, optimizer_state), (loss_value, loss_q_values)
 
-            updates, metrics = jax.lax.scan(
-                update_model, (params, optimizer_state), (minibatches, targets)
+                return (key, step_env_state, next_state, next_action, next_q), (
+                    transition,
+                    info,
+                )
+
+            final_env_carry, intermediate_values = jax.lax.scan(
+                step, env_carry, None, args.num_steps
             )
-            updated_params, updated_optimizer = updates
-            return (next_rng, updated_params, updated_optimizer), metrics
+            env_step += args.num_steps * args.num_environments
 
-        # Handle key split
-        epoch_outs, (epoch_loss, epoch_q_values) = jax.lax.scan(
-            epoch, (subkey, network_params, opt_state), None, args.num_epochs
-        )
-        epoch_key, epoch_params, epoch_opt_state = epoch_outs
-        step_number += 1
+            transitions, infos = intermediate_values
 
-        ### TODO: Compute episode return metrics based on discussion with Mike
+            # Compute Targets
+            if args.lambda_returns:
 
-        metrics = {
-            "env_step": env_step,
-            "update_steps": step_number,
-            "td_loss": epoch_loss.mean(),
-            "q_values": epoch_q_values.mean(),
-        }
-        metrics.update({k: v.mean() for k, v in infos.items()})
+                def lambda_targets(carry, transition):
+                    target = carry
+                    updated_target = transition.reward + (
+                        1 - transition.done
+                    ) * args.gamma * (
+                        args.lam * target + (1 - args.lam) * transition.next_q_value
+                    )
+                    return updated_target, updated_target
 
-        # Compute EMA of episode returns and lengths
+                # Want to compute the targets. Each target will have the final q value in it, so we can start with that
+                all_but_last_transitions = jax.tree.map(lambda x: x[:-1], transitions)
+                lambda_returns = transitions.q_value[-1, :]
+                carry = lambda_returns
+                final_target_carry, targets = jax.lax.scan(
+                    lambda_targets, carry, all_but_last_transitions, reverse=True
+                )
+                update_targets = jnp.concatenate((targets, lambda_returns[np.newaxis]))
+            else:
 
-        is_done = infos["returned_episode"]
-        episode_returns = infos["returned_episode_returns"]
-        episode_lengths = infos["returned_episode_lengths"]
-        num_dones = is_done.sum()
+                def targets(transition, gamma):
+                    return (
+                        transition.reward
+                        + (1 - transition.done) * gamma * transition.next_q_value
+                    )
 
-        returns_ema, lengths_ema = train_episode_metrics
+                update_targets = jax.vmap(targets, in_axes=(0, None))(
+                    transitions, args.gamma
+                )
 
-        mean_episode_return = jnp.sum(is_done * episode_returns) / jnp.maximum(
-            num_dones, 1
-        )
-        effective_alpha = 1 - (1 - ema_alpha) ** num_dones
-        updated_returns_ema = jnp.where(
-            num_dones > 0,
-            returns_ema + effective_alpha * (mean_episode_return - returns_ema),
-            returns_ema,
-        )
+            # Split network for eqx
+            network_params, _ = eqx.partition(model, eqx.is_array)
 
-        mean_episode_length = jnp.sum(is_done * episode_lengths) / jnp.maximum(
-            num_dones, 1
-        )
-        updated_episode_lengths_ema = jnp.where(
-            num_dones > 0,
-            lengths_ema + effective_alpha * (mean_episode_length - lengths_ema),
-            lengths_ema,
-        )
+            def epoch(carry, _):
+                rng, params, optimizer_state = carry
+                next_rng, epoch_rng = jax.random.split(rng, 2)
 
-        metrics["moving_avg_return"] = updated_returns_ema
-        metrics["moving_avg_length"] = updated_episode_lengths_ema
+                # Shuffle data
+                def process_data(x, rng):
+                    x = x.reshape(-1, *x.shape[2:])
+                    x = jax.random.permutation(rng, x)
+                    return x.reshape(args.num_minibatches, -1, *x.shape[1:])
 
-        return (
-            epoch_key,
+                # Using the same key will make sure data is shuffled in the same way across all fields
+
+                minibatches = jax.tree_util.tree_map(
+                    lambda x: process_data(x, epoch_rng), transitions
+                )
+                targets = jax.tree_util.tree_map(
+                    lambda x: process_data(x, epoch_rng), update_targets
+                )
+
+                # Compute the loss and update the model
+                def update_model(carry, batch):
+                    model_params, optimizer_state = carry
+                    model = eqx.combine(model_params, static)
+                    mini_batch, targets = batch
+                    (loss_value, loss_q_values), grads = eqx.filter_value_and_grad(
+                        loss, has_aux=True
+                    )(model, mini_batch.state, mini_batch.action, targets)
+                    updates, optimizer_state = optim.update(
+                        grads, optimizer_state, eqx.filter(model, eqx.is_array)
+                    )
+                    model = eqx.apply_updates(model, updates)
+                    params, _ = eqx.partition(model, eqx.is_array)
+                    return (params, optimizer_state), (loss_value, loss_q_values)
+
+                updates, metrics = jax.lax.scan(
+                    update_model, (params, optimizer_state), (minibatches, targets)
+                )
+                updated_params, updated_optimizer = updates
+                return (next_rng, updated_params, updated_optimizer), metrics
+
+            # Handle key split
+            epoch_outs, (epoch_loss, epoch_q_values) = jax.lax.scan(
+                epoch, (subkey, network_params, opt_state), None, args.num_epochs
+            )
+            epoch_key, epoch_params, epoch_opt_state = epoch_outs
+            step_number += 1
+
+            ### TODO: Compute episode return metrics based on discussion with Mike
+
+            metrics = {
+                "env_step": env_step,
+                "update_steps": step_number,
+                "td_loss": epoch_loss.mean(),
+                "q_values": epoch_q_values.mean(),
+            }
+            metrics.update({k: v.mean() for k, v in infos.items()})
+
+            # Compute EMA of episode returns and lengths
+
+            is_done = infos["returned_episode"]
+            episode_returns = infos["returned_episode_returns"]
+            episode_lengths = infos["returned_episode_lengths"]
+            num_dones = is_done.sum()
+
+            returns_ema, lengths_ema = train_episode_metrics
+
+            mean_episode_return = jnp.sum(is_done * episode_returns) / jnp.maximum(
+                num_dones, 1
+            )
+            effective_alpha = 1 - (1 - ema_alpha) ** num_dones
+            updated_returns_ema = jnp.where(
+                num_dones > 0,
+                returns_ema + effective_alpha * (mean_episode_return - returns_ema),
+                returns_ema,
+            )
+
+            mean_episode_length = jnp.sum(is_done * episode_lengths) / jnp.maximum(
+                num_dones, 1
+            )
+            updated_episode_lengths_ema = jnp.where(
+                num_dones > 0,
+                lengths_ema + effective_alpha * (mean_episode_length - lengths_ema),
+                lengths_ema,
+            )
+
+            metrics["moving_avg_return"] = updated_returns_ema
+            metrics["moving_avg_length"] = updated_episode_lengths_ema
+
+            return (
+                epoch_key,
+                step_number,
+                env_step,
+                final_env_carry,
+                epoch_params,
+                (updated_returns_ema, updated_episode_lengths_ema),
+            ), metrics
+
+        training_carry = (
+            key,
             step_number,
             env_step,
-            final_env_carry,
-            epoch_params,
-            (updated_returns_ema, updated_episode_lengths_ema),
-        ), metrics
+            initial_env_carry,
+            dynamic_params,
+            episode_metrics,
+        )
+        return jax.lax.scan(train_step, training_carry, None, num_updates)
 
-    training_carry = (
-        key,
-        step_number,
-        env_step,
-        initial_env_carry,
-        dynamic_params,
-        episode_metrics,
-    )
-    return jax.lax.scan(train_step, training_carry, None, num_updates)
+    return run
 
 
 if __name__ == "__main__":
     args = tyro.cli(Args)
     print("Starting Run")
-    compiled_run = jax.jit(run, static_argnames=("args",))
-    item1, item2 = compiled_run(args)
-    metrics = item2
+    rng = jax.random.PRNGKey(args.seed)
+
+    t0 = time.time()
+    rngs = jax.random.split(rng, args.num_seeds)
+    compiled_run = jax.jit(jax.vmap(make_run(args)))
+    item1, metrics = jax.block_until_ready(compiled_run(rngs))
+    print(f"Took: {time.time() - t0}")
 
     ### TODO: Add better logging of results
-    print(metrics["moving_avg_return"])
-    print(metrics["moving_avg_length"])
+    np.savez(args.metrics_file_name, **metrics)
     print("Finished Run")
