@@ -1,50 +1,36 @@
-import threading
-from collections import defaultdict, deque
-from concurrent.futures import ThreadPoolExecutor
-from functools import partial as bind
-
-import elements
-from jax._src.core import axis_frame
 import numpy as np
-
-from . import chunk as chunklib
-from . import limiters
-from . import selectors
 import jax.numpy as jnp
 
 
 class Counts:
-    def __init__(self, act_space, stoch_size=1, classes_size=1, beta=1, init_count=1, mode='state_action',
-                 count_imagined=True):
-        self.num_actions = act_space['action'].high - act_space['action'].low + 1
-        self.stoch_size = stoch_size
-        self.classes_size = classes_size
+    def __init__(self, num_actions, hidden_size=1, num_bins=1, beta=1, init_count=1, mode='state_action'):
+        self.num_actions = num_actions
+        self.hidden_size = hidden_size
+        self.num_bins = num_bins
         self.beta = beta
         self.mode = mode
         self.init_count = init_count
-        self.count_imagined = count_imagined
         if mode == 'state_action':
-            self._checkpoint_counts = np.zeros((self.num_actions, self.stoch_size, self.classes_size),
+            self._checkpoint_counts = np.zeros((self.num_actions, self.hidden_size, self.num_bins),
                                                dtype=np.int32) + init_count
         elif mode == 'state':
-            self._checkpoint_counts = np.zeros((self.stoch_size, self.classes_size), dtype=np.int32) + init_count
+            self._checkpoint_counts = np.zeros((self.hidden_size, self.num_bins), dtype=np.int32) + init_count
         else:
             raise ValueError(f"Unknown mode {mode} for Counts module.")
 
     def reset_counts(self):
         if self.mode == 'state_action':
-            self._checkpoint_counts = np.zeros((self.num_actions, self.stoch_size, self.classes_size),
+            self._checkpoint_counts = np.zeros((self.num_actions, self.hidden_size, self.num_bins),
                                                dtype=np.int32) + self.init_count
         elif self.mode == 'state':
-            self._checkpoint_counts = np.zeros((self.stoch_size, self.classes_size), dtype=np.int32) + self.init_count
+            self._checkpoint_counts = np.zeros((self.hidden_size, self.num_bins), dtype=np.int32) + self.init_count
 
     def initial(self):
         if self.mode == 'state_action':
-            return jnp.zeros((self.num_actions, self.stoch_size, self.classes_size), dtype=jnp.int32) + self.init_count
+            return jnp.zeros((self.num_actions, self.hidden_size, self.num_bins), dtype=jnp.int32) + self.init_count
         elif self.mode == 'state':
-            return jnp.zeros((self.stoch_size, self.classes_size), dtype=jnp.int32) + self.init_count
+            return jnp.zeros((self.hidden_size, self.num_bins), dtype=jnp.int32) + self.init_count
 
-    @elements.timer.section('counts_add')
     def counts_add(self, step, worker=0):
         step = {k: v for k, v in step.items() if not k.startswith('log/')}
         action_id = step['action']

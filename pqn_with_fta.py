@@ -8,15 +8,21 @@ import optax
 import tyro
 import gymnax
 import chex
+from jaxtyping import Array
 
 import activations
 from exploration import epsilon_greedy
 from wrappers import FlattenObservationWrapper, LogWrapper
 
+"""
+IN PROGRESS
+PQN implementation with discrete activations for use with count based exploration
+"""
+
 
 @chex.dataclass(frozen=True)
 class Args:
-    seed: int = 1
+    seed: int = 0
     initial_learning_rate: float = 1e-4
     final_learning_rate: float = 1e-20
     environment: str = "CartPole-v1"
@@ -53,6 +59,7 @@ class Transition:
 
 class QNetwork(eqx.Module):
     layers: list
+    counts: Array
 
     def __init__(self, input_size, num_actions, hidden_size, key):
         key1, key2, key3 = jax.random.split(key, 3)
