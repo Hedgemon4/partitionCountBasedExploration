@@ -12,6 +12,10 @@ import chex
 from exploration import epsilon_greedy
 from wrappers import FlattenObservationWrapper, LogWrapper
 
+"""
+PQN implementation based on https://github.com/mttga/purejaxql/blob/main/purejaxql/pqn_gymnax.py
+"""
+
 
 @chex.dataclass(frozen=True)
 class Args:

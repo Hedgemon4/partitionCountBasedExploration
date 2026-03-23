@@ -209,3 +209,6 @@ __marimo__/
 # Other
 .idea
 scratch.py
+scratch_notebook.ipynb
+data
+graphs
