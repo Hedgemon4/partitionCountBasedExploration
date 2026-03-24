@@ -25,7 +25,7 @@ def process_metrics(filename):
 
 
 # Load data for both implementations
-steps_my, returns_my, ci_my = process_metrics('data/pqn_my_implementation_metrics.npz')
+steps_my, returns_my, ci_my = process_metrics('data/pqn_original_cartpole_default_params.npz')
 steps_cp, returns_cp, ci_cp = process_metrics('data/pqn_cartpole_metrics.npz')
 
 # Plotting
@@ -44,4 +44,4 @@ plt.ylabel('Average Return')
 plt.title('Average Return (95% CI)')
 plt.legend()
 plt.grid(True, linestyle='--', alpha=0.7)
-plt.savefig('graphs/moving_avg_return_ci_plot.png')
+plt.savefig('pqn_original_cartpole_default_params.png')

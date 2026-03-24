@@ -41,7 +41,7 @@ class Args:
     num_episodes_for_average: int = 30
     learnable_norm_params: bool = True
     sarsa_returns: bool = False
-    metrics_file_name: str = "pqn_fix_opt_state.npz"
+    metrics_file_name: str = "pqn_original_cartpole_default_params.npz"
 
 
 @chex.dataclass(frozen=True)

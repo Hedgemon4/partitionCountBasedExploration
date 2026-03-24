@@ -40,8 +40,8 @@ class Args:
     reward_scale: float = 0.1
     num_episodes_for_average: int = 30
     learnable_norm_params: bool = True
-    sarsa_returns: bool = False
-    metrics_file_name: str = "pqn_fixed_sarsa.npz"
+    sarsa_returns: bool = True
+    metrics_file_name: str = "pqn_cartpole_with_sarsa_default_params.npz"
 
 
 @chex.dataclass(frozen=True)
@@ -145,7 +145,7 @@ def make_run(args: Args):
             ),
         )
 
-        opt_state = optim.init(eqx.filter(initial_model, eqx.is_array))
+        initial_opt_state = optim.init(eqx.filter(initial_model, eqx.is_array))
 
         # Epsilon Decay Setup
         epsilon_schedule = optax.linear_schedule(
@@ -191,6 +191,7 @@ def make_run(args: Args):
                 env_step,
                 env_carry,
                 carry_params,
+                carry_opt_state,
                 train_episode_metrics,
             ) = carry
             epsilon = epsilon_schedule(step_number)
@@ -261,20 +262,19 @@ def make_run(args: Args):
                     return (updated_target, next_q), updated_target
 
                 # Want to compute the targets. Each target will have the final q value in it, so we can start with that
-                lambda_returns = transitions.selected_next_q_value[-1, :]
-                carry = (
-                    lambda_returns,
-                    (
-                        transitions.selected_next_q_value[-1, :]
-                        if args.sarsa_returns
-                        else jnp.max(transitions.all_next_q_values[-1, :], axis=-1)
-                    ),
+                last_q_value = (
+                    transitions.selected_next_q_value[-1, :]
+                    if args.sarsa_returns
+                    else jnp.max(transitions.all_next_q_values[-1, :], axis=-1)
                 )
+                last_q_value = last_q_value * (1 - transitions.done[-1])  # If done, then no q value
+                initial_return = transitions.reward[-1] + args.gamma * last_q_value
+                carry = (initial_return, last_q_value)
                 final_target_carry, targets = jax.lax.scan(
-                    lambda_targets, carry, transitions, reverse=True
+                    lambda_targets, carry, jax.tree_util.tree_map(lambda x: x[:-1], transitions), reverse=True
                 )
-                # update_targets = jnp.concatenate((targets, lambda_returns[np.newaxis]))
-                update_targets = targets
+                update_targets = jnp.concatenate((targets, initial_return[np.newaxis]))
+                # update_targets = targets
             else:
 
                 def targets(transition, gamma):
@@ -334,7 +334,7 @@ def make_run(args: Args):
 
             # Handle key split
             epoch_outs, (epoch_loss, epoch_q_values) = jax.lax.scan(
-                epoch, (subkey, network_params, opt_state), None, args.num_epochs
+                epoch, (subkey, network_params, carry_opt_state), None, args.num_epochs
             )
             epoch_key, epoch_params, epoch_opt_state = epoch_outs
             step_number += 1
@@ -386,6 +386,7 @@ def make_run(args: Args):
                 env_step,
                 final_env_carry,
                 epoch_params,
+                epoch_opt_state,
                 (updated_returns_ema, updated_episode_lengths_ema),
             ), metrics
 
@@ -395,6 +396,7 @@ def make_run(args: Args):
             env_step,
             initial_env_carry,
             dynamic_params,
+            initial_opt_state,
             episode_metrics,
         )
         return jax.lax.scan(train_step, training_carry, None, num_updates)
