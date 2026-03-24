@@ -88,14 +88,23 @@ class QNetwork(eqx.Module):
             x = layer(x)
         return x
 
+
 def init_linear_weights_lecun(model, key):
     is_linear = lambda x: isinstance(x, eqx.nn.Linear)
 
     def get_weights(m):
-        return [l.weight for l in jax.tree_util.tree_leaves(m, is_leaf=is_linear) if is_linear(l)]
+        return [
+            l.weight
+            for l in jax.tree_util.tree_leaves(m, is_leaf=is_linear)
+            if is_linear(l)
+        ]
 
     def get_biases(m):
-        return [l.bias for l in jax.tree_util.tree_leaves(m, is_leaf=is_linear) if is_linear(l)]
+        return [
+            l.bias
+            for l in jax.tree_util.tree_leaves(m, is_leaf=is_linear)
+            if is_linear(l)
+        ]
 
     weights = get_weights(model)
     biases = get_biases(model)
@@ -293,11 +302,16 @@ def make_run(args: Args):
                     if args.sarsa_returns
                     else jnp.max(transitions.all_next_q_values[-1, :], axis=-1)
                 )
-                last_q_value = last_q_value * (1 - transitions.done[-1])  # If done, then no q value
+                last_q_value = last_q_value * (
+                    1 - transitions.done[-1]
+                )  # If done, then no q value
                 initial_return = transitions.reward[-1] + args.gamma * last_q_value
                 carry = (initial_return, last_q_value)
                 final_target_carry, targets = jax.lax.scan(
-                    lambda_targets, carry, jax.tree_util.tree_map(lambda x: x[:-1], transitions), reverse=True
+                    lambda_targets,
+                    carry,
+                    jax.tree_util.tree_map(lambda x: x[:-1], transitions),
+                    reverse=True,
                 )
                 update_targets = jnp.concatenate((targets, initial_return[np.newaxis]))
                 # update_targets = targets

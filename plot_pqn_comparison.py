@@ -5,10 +5,11 @@ import matplotlib.pyplot as plt
 Plotting script to compare average returns for this PQN implementation to the original
 """
 
+
 def process_metrics(filename):
     data = np.load(filename)
-    steps = data['env_step']  # Shape (30, 244)
-    returns = data['moving_avg_return']  # Shape (30, 244)
+    steps = data["env_step"]  # Shape (30, 244)
+    returns = data["moving_avg_return"]  # Shape (30, 244)
 
     n_seeds = returns.shape[0]  # n=30
 
@@ -25,23 +26,33 @@ def process_metrics(filename):
 
 
 # Load data for both implementations
-steps_my, returns_my, ci_my = process_metrics('data/pqn_original_cartpole_default_params.npz')
-steps_cp, returns_cp, ci_cp = process_metrics('data/pqn_cartpole_metrics.npz')
+steps_my, returns_my, ci_my = process_metrics(
+    "data/pqn_original_cartpole_default_params.npz"
+)
+steps_cp, returns_cp, ci_cp = process_metrics("data/pqn_cartpole_metrics.npz")
 
 # Plotting
 plt.figure(figsize=(10, 6))
 
 # Plot My Implementation
-plt.plot(steps_my, returns_my, label='Seth PQN Implementation', color='blue', linewidth=2)
-plt.fill_between(steps_my, returns_my - ci_my, returns_my + ci_my, color='blue', alpha=0.2)
+plt.plot(
+    steps_my, returns_my, label="Seth PQN Implementation", color="blue", linewidth=2
+)
+plt.fill_between(
+    steps_my, returns_my - ci_my, returns_my + ci_my, color="blue", alpha=0.2
+)
 
 # Plot Cartpole Reference
-plt.plot(steps_cp, returns_cp, label='Original PQN Implementation', color='red', linewidth=2)
-plt.fill_between(steps_cp, returns_cp - ci_cp, returns_cp + ci_cp, color='red', alpha=0.2)
+plt.plot(
+    steps_cp, returns_cp, label="Original PQN Implementation", color="red", linewidth=2
+)
+plt.fill_between(
+    steps_cp, returns_cp - ci_cp, returns_cp + ci_cp, color="red", alpha=0.2
+)
 
-plt.xlabel('Timesteps')
-plt.ylabel('Average Return')
-plt.title('Average Return (95% CI)')
+plt.xlabel("Timesteps")
+plt.ylabel("Average Return")
+plt.title("Average Return (95% CI)")
 plt.legend()
-plt.grid(True, linestyle='--', alpha=0.7)
-plt.savefig('pqn_original_cartpole_default_params.png')
+plt.grid(True, linestyle="--", alpha=0.7)
+plt.savefig("pqn_original_cartpole_default_params.png")

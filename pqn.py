@@ -267,11 +267,16 @@ def make_run(args: Args):
                     if args.sarsa_returns
                     else jnp.max(transitions.all_next_q_values[-1, :], axis=-1)
                 )
-                last_q_value = last_q_value * (1 - transitions.done[-1])  # If done, then no q value
+                last_q_value = last_q_value * (
+                    1 - transitions.done[-1]
+                )  # If done, then no q value
                 initial_return = transitions.reward[-1] + args.gamma * last_q_value
                 carry = (initial_return, last_q_value)
                 final_target_carry, targets = jax.lax.scan(
-                    lambda_targets, carry, jax.tree_util.tree_map(lambda x: x[:-1], transitions), reverse=True
+                    lambda_targets,
+                    carry,
+                    jax.tree_util.tree_map(lambda x: x[:-1], transitions),
+                    reverse=True,
                 )
                 update_targets = jnp.concatenate((targets, initial_return[np.newaxis]))
                 # update_targets = targets
