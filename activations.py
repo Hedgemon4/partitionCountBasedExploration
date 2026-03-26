@@ -3,6 +3,8 @@ import jax.numpy as jnp
 import jax
 import equinox as eqx
 
+from configs.activations import ActivationConfig, FTAConfig, ElephantConfig, ReLUConfig
+
 ### Talked to quinn about sparsity; later layers less sparse?
 
 
@@ -23,8 +25,9 @@ class FTA(eqx.Module):
         self.static_centres = static_centres
 
     def __call__(self, x: Array) -> Array:
-        jax.debug.print("FTA Centres: {}", self.centres)
-        centres = jax.lax.stop_gradient(self.centres) if self.static_centres else self.centres
+        centres = (
+            jax.lax.stop_gradient(self.centres) if self.static_centres else self.centres
+        )
 
         z = jnp.expand_dims(x, axis=-1)
         term1 = jax.nn.relu(centres - z)
@@ -47,6 +50,39 @@ class ElephantActivation(eqx.Module):
         self.d = d
 
     def __call__(self, x):
-        return (self.h / (1 + jnp.abs(x / self.a) ** self.d))
+        return self.h / (1 + jnp.abs(x / self.a) ** self.d)
 
 
+class TiledElephantActivation(eqx.Module):
+    a: Array
+    h: Array
+    d: float
+    centres: Array
+    static_centres: bool
+
+    def __init__(self, a, h, d, num_features, num_bins, bin_size, static_centres=True):
+        self.a = jnp.ones(num_features) * a
+        self.h = jnp.ones(num_features) * h
+        self.d = d
+        self.centres = jnp.arange(num_bins) * bin_size - (num_bins * bin_size / 2)
+        self.static_centres = static_centres
+        self.num_bins = num_bins
+
+    def __call__(self, x):
+        z = jnp.expand_dims(x, axis=-1)
+        centres = (
+            jax.lax.stop_gradient(self.centres) if self.static_centres else self.centres
+        )
+        return self.h[:, None] / (1 + jnp.abs(z - centres / self.a[:, None]) ** self.d)
+
+
+def make_activation(config: ActivationConfig):
+    if isinstance(config, FTAConfig):
+        return FTA(
+            bound=config.bound, eta=config.eta, static_centres=config.static_centres
+        )
+    elif isinstance(config, ElephantConfig):
+        return ElephantActivation(a=config.a, h=config.h, d=config.d)
+    elif isinstance(config, ReLUConfig):
+        return eqx.nn.Lambda(jax.nn.relu)
+    raise ValueError(f"Unknown config: {type(config)}")

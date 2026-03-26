@@ -1,3 +1,5 @@
+import dataclasses
+import os
 import time
 
 import equinox as eqx
@@ -8,44 +10,16 @@ import optax
 import tyro
 import gymnax
 import chex
-from jaxtyping import Array
+import yaml
 
 import activations
+from configs.defaults import DefaultMountainCarConfig
 from exploration import epsilon_greedy
 from wrappers import FlattenObservationWrapper, LogWrapper
 
 """
 PQN implementation based on https://github.com/mttga/purejaxql/blob/main/purejaxql/pqn_gymnax.py
 """
-
-
-@chex.dataclass(frozen=True)
-class Args:
-    seed: int = 0
-    num_seeds: int = 30
-    initial_learning_rate: float = 0.0001
-    final_learning_rate: float = 1e-20
-    environment: str = "CartPole-v1"
-    num_environments: int = 32
-    num_steps: int = 64
-    total_time_steps: int = 5e5
-    epsilon_start: float = 1.0
-    epsilon_end: float = 0.2
-    epsilon_decay: float = 0.2
-    num_epochs: int = 4
-    num_minibatches: int = 16
-    hidden_size: int = 32
-    gamma: float = 0.99
-    lambda_returns: bool = True
-    lam: float = 0.95
-    max_grad_norm: float = 10
-    reward_scale: float = 0.1
-    num_episodes_for_average: int = 30
-    learnable_norm_params: bool = True
-    sarsa_returns: bool = False
-    bound: float = 20.0
-    eta: float = 2.0
-    metrics_file_name: str = "pqn_cartpole_with_smaller_hidden_not_trained_centres.npz"
 
 
 @chex.dataclass(frozen=True)
@@ -69,9 +43,14 @@ class QNetwork(eqx.Module):
     def __init__(self, input_size, num_actions, hidden_size, key):
         key1, key2, key3 = jax.random.split(key, 3)
 
-        fuzzy_tiling = activations.FTA(bound=args.bound, eta=args.eta)
+        # Instantiate both activation layers
+        activation_layer_1 = activations.make_activation(args.act_1)
+        activation_layer_2 = activations.make_activation(args.act_2)
 
-        ### TODO: Might need to transpose for atari
+        # Determine the width of the second linear layer's input.
+        second_linear_width = getattr(activation_layer_1, "num_bins", 1) * hidden_size
+        final_linear_width = getattr(activation_layer_2, "num_bins", 1) * hidden_size
+
         self.layers = [
             eqx.nn.Linear(in_features=input_size, out_features=hidden_size, key=key1),
             eqx.nn.LayerNorm(
@@ -79,10 +58,10 @@ class QNetwork(eqx.Module):
                 use_weight=args.learnable_norm_params,
                 use_bias=args.learnable_norm_params,
             ),
-            fuzzy_tiling,
+            activation_layer_1,
             eqx.nn.Lambda(jnp.ravel),
             eqx.nn.Linear(
-                in_features=fuzzy_tiling.num_bins * hidden_size,
+                in_features=second_linear_width,
                 out_features=hidden_size,
                 key=key2,
             ),
@@ -91,8 +70,11 @@ class QNetwork(eqx.Module):
                 use_weight=args.learnable_norm_params,
                 use_bias=args.learnable_norm_params,
             ),
-            jax.nn.relu,
-            eqx.nn.Linear(in_features=hidden_size, out_features=num_actions, key=key3),
+            activation_layer_2,
+            eqx.nn.Lambda(jnp.ravel),
+            eqx.nn.Linear(
+                in_features=final_linear_width, out_features=num_actions, key=key3
+            ),
         ]
 
     def __call__(self, x):
@@ -122,7 +104,7 @@ def loss(model, states, actions, targets):
     return 0.5 * jnp.mean((selected_q_values - targets) ** 2), selected_q_values
 
 
-def make_run(args: Args):
+def make_run(args):
     num_updates = int(args.total_time_steps // args.num_environments // args.num_steps)
 
     # Environment Setup
@@ -422,7 +404,16 @@ def make_run(args: Args):
 
 
 if __name__ == "__main__":
-    args = tyro.cli(Args)
+    args = tyro.cli(DefaultMountainCarConfig)
+
+    path = "data/" + args.metrics_folder_name + "/"
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+    # Save config for reproducibility
+    with open(path + "config.yaml", "w") as f:
+        yaml.dump(dataclasses.asdict(args), f)
+
     print("Starting Run")
     rng = jax.random.PRNGKey(args.seed)
 
@@ -433,5 +424,5 @@ if __name__ == "__main__":
     print(f"Took: {time.time() - t0}")
 
     ### TODO: Add better logging of results
-    np.savez("data/" + args.metrics_file_name, **metrics)
+    np.savez(path + "metrics.npz", **metrics)
     print("Finished Run")

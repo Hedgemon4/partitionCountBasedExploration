@@ -9,39 +9,13 @@ import tyro
 import gymnax
 import chex
 
+from configs.defaults import PQNCartpoleConfig
 from exploration import epsilon_greedy
 from wrappers import FlattenObservationWrapper, LogWrapper
 
 """
 PQN implementation based on https://github.com/mttga/purejaxql/blob/main/purejaxql/pqn_gymnax.py
 """
-
-
-@chex.dataclass(frozen=True)
-class Args:
-    seed: int = 0
-    num_seeds: int = 30
-    initial_learning_rate: float = 0.0001
-    final_learning_rate: float = 1e-20
-    environment: str = "CartPole-v1"
-    num_environments: int = 32
-    num_steps: int = 64
-    total_time_steps: int = 5e5
-    epsilon_start: float = 1.0
-    epsilon_end: float = 0.2
-    epsilon_decay: float = 0.2
-    num_epochs: int = 4
-    num_minibatches: int = 16
-    hidden_size: int = 256
-    gamma: float = 0.99
-    lambda_returns: bool = True
-    lam: float = 0.95
-    max_grad_norm: float = 10
-    reward_scale: float = 0.1
-    num_episodes_for_average: int = 30
-    learnable_norm_params: bool = True
-    sarsa_returns: bool = True
-    metrics_file_name: str = "pqn_cartpole_with_sarsa_default_params.npz"
 
 
 @chex.dataclass(frozen=True)
@@ -110,7 +84,7 @@ def loss(model, states, actions, targets):
     return 0.5 * jnp.mean((selected_q_values - targets) ** 2), selected_q_values
 
 
-def make_run(args: Args):
+def make_run(args):
     num_updates = int(args.total_time_steps // args.num_environments // args.num_steps)
 
     # Environment Setup
@@ -410,7 +384,7 @@ def make_run(args: Args):
 
 
 if __name__ == "__main__":
-    args = tyro.cli(Args)
+    args = tyro.cli(PQNCartpoleConfig)
     print("Starting Run")
     rng = jax.random.PRNGKey(args.seed)
 
