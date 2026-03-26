@@ -34,7 +34,7 @@ class Args:
     epsilon_decay: float = 0.2
     num_epochs: int = 4
     num_minibatches: int = 16
-    hidden_size: int = 256
+    hidden_size: int = 32
     gamma: float = 0.99
     lambda_returns: bool = True
     lam: float = 0.95
@@ -43,7 +43,9 @@ class Args:
     num_episodes_for_average: int = 30
     learnable_norm_params: bool = True
     sarsa_returns: bool = False
-    metrics_file_name: str = "pqn_cartpole_default_params.npz"
+    bound: float = 20.0
+    eta: float = 2.0
+    metrics_file_name: str = "pqn_cartpole_with_smaller_hidden_not_trained_centres.npz"
 
 
 @chex.dataclass(frozen=True)
@@ -62,13 +64,12 @@ class Transition:
 
 class QNetwork(eqx.Module):
     layers: list
-    counts: Array
+    # counts: Array
 
     def __init__(self, input_size, num_actions, hidden_size, key):
         key1, key2, key3 = jax.random.split(key, 3)
-        k = int(args.bound * args.eta / 2)
-        centres = args.eta * jnp.arange(k) - args.bound
-        fuzzy_tiling = partial(activations.fta, centres=centres, eta=args.eta)
+
+        fuzzy_tiling = activations.FTA(bound=args.bound, eta=args.eta)
 
         ### TODO: Might need to transpose for atari
         self.layers = [
@@ -78,8 +79,13 @@ class QNetwork(eqx.Module):
                 use_weight=args.learnable_norm_params,
                 use_bias=args.learnable_norm_params,
             ),
-            jax.nn.relu,
-            eqx.nn.Linear(in_features=hidden_size, out_features=hidden_size, key=key2),
+            fuzzy_tiling,
+            eqx.nn.Lambda(jnp.ravel),
+            eqx.nn.Linear(
+                in_features=fuzzy_tiling.num_bins * hidden_size,
+                out_features=hidden_size,
+                key=key2,
+            ),
             eqx.nn.LayerNorm(
                 hidden_size,
                 use_weight=args.learnable_norm_params,
