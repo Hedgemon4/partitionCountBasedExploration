@@ -5,24 +5,28 @@ import equinox as eqx
 
 
 @dataclasses.dataclass(frozen=True)
-class FTAConfig:
+class ActivationConfig:
+    type: str = "unknown"
+
+class FTAConfig(ActivationConfig):
     type: Literal["fta"] = "fta"
+
+class FTADefaultConfig(FTAConfig):
     bound: float = 20.0
     eta: float = 2.0
     static_centres: bool = True
 
+class FTAMountainCarConfig(FTAConfig):
+    bound: float = 1.0
+    eta: float = 0.1
+    static_centres: bool = True
 
-@dataclasses.dataclass(frozen=True)
-class ElephantConfig:
+class ElephantConfig(ActivationConfig):
     type: Literal["elephant"] = "elephant"
     a: float = 1.0
     h: float = 1.0
     d: float = 2.0
 
-
-@dataclasses.dataclass(frozen=True)
-class ReLUConfig:
+class ReLUConfig(ActivationConfig):
     type: Literal["relu"] = "relu"
 
-
-ActivationConfig = Union[FTAConfig, ElephantConfig, ReLUConfig]

@@ -18,9 +18,12 @@ class FTA(eqx.Module):
     def __init__(self, bound, eta, static_centres=True):
         self.bound = bound
         self.eta = eta
-        self.num_bins = int(self.bound * self.eta / 2)
+        self.num_bins = int(2.0 * self.bound / self.eta)
         self.centres = self.eta * jnp.arange(self.num_bins) - self.bound
         self.static_centres = static_centres
+
+        # Add bins to account for static centres
+        self.num_bins += 2
 
     def __call__(self, x: Array) -> Array:
         centres = (
@@ -44,7 +47,7 @@ class FTA(eqx.Module):
         return final_activation
 
     def fta_indicator(self, x):
-        return jnp.where(x < self.eta, x, 0.0) + jnp.where(x > self.eta, 1.0, 0.0)
+        return jnp.where(x <= self.eta, x, 0.0) + jnp.where(x > self.eta, 1.0, 0.0)
 
 
 class ElephantActivation(eqx.Module):

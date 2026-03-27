@@ -1,6 +1,6 @@
 import chex
 
-from configs.activations import ActivationConfig
+from configs.activations import ActivationConfig, FTAMountainCarConfig
 from dataclasses import field
 from configs.activations import FTAConfig, ReLUConfig
 
@@ -88,5 +88,5 @@ class DefaultMountainCarConfig:
     metrics_folder_name: str = "pqn_mountaincar_with_fta"
 
     # Network Activation Configs
-    act_1: ActivationConfig = field(default_factory=FTAConfig)
+    act_1: ActivationConfig = field(default_factory=FTAMountainCarConfig)
     act_2: ActivationConfig = field(default_factory=ReLUConfig)

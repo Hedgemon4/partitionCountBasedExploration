@@ -13,6 +13,7 @@ import gymnax
 import chex
 import yaml
 from jax import Array
+from jax.nn import one_hot
 
 import activations
 from configs.defaults import DefaultMountainCarConfig
@@ -53,7 +54,7 @@ class QNetwork(eqx.Module):
 
         # Initialize Counts
         num_bins_1 = getattr(activation_layer_1, "num_bins", 1)
-        self.counts = jnp.ones((hidden_size, num_bins_1, num_actions))
+        self.counts = jnp.ones((num_actions, hidden_size, num_bins_1))
 
         # Determine the width of the second linear layer's input.
         second_linear_width = num_bins_1 * hidden_size
@@ -89,6 +90,10 @@ class QNetwork(eqx.Module):
             ),
         ]
 
+    def update_counts(self, discrete_states, actions):
+        return
+
+
     def __call__(self, x):
         for layer in self.block1:
             x = layer(x)
@@ -101,7 +106,12 @@ class QNetwork(eqx.Module):
         for layer in self.value_head:
             x = layer(x)
 
-        return x, first_activation
+        priority_layer = first_activation[:, 0] < 0.0
+        argmax = jnp.argmax(first_activation, axis=-1)
+        final_indices = jnp.where(priority_layer, 0, argmax)
+        discrete_representation = one_hot(final_indices, first_activation.shape[-1])
+
+        return x, discrete_representation
 
 
 def make_env(environment_name):
@@ -174,7 +184,7 @@ def make_run(args):
         start_state, start_env_state = vmap_reset(args.num_environments)(subkey)
 
         # Get first actions
-        initial_q_values = jax.vmap(initial_model)(start_state)
+        initial_q_values, initial_discrete_state = jax.vmap(initial_model)(start_state)
         key, subkey = jax.random.split(key, 2)
         initial_action, initial_selected_q = epsilon_greedy(
             subkey, args.epsilon_start, initial_q_values
@@ -225,6 +235,7 @@ def make_run(args):
                 )(subkey, step_env_state, action)
                 # Get next actions
                 next_q_values, discrete_states = jax.vmap(model)(next_state)
+                jax.debug.print("Discrete states: {}", discrete_states[0, 0])
                 key, subkey = jax.random.split(key, 2)
                 next_action, next_q = epsilon_greedy(subkey, epsilon, next_q_values)
                 scaled_reward = reward * args.reward_scale
