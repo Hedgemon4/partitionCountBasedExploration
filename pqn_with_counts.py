@@ -1,3 +1,4 @@
+
 import dataclasses
 import os
 import time
@@ -11,6 +12,7 @@ import tyro
 import gymnax
 import chex
 import yaml
+from jax import Array
 
 import activations
 from configs.defaults import DefaultMountainCarConfig
@@ -38,6 +40,7 @@ class Transition:
 
 class QNetwork(eqx.Module):
     layers: list
+    counts: Array
 
     def __init__(self, input_size, num_actions, hidden_size, key):
         key1, key2, key3 = jax.random.split(key, 3)
@@ -45,6 +48,8 @@ class QNetwork(eqx.Module):
         # Instantiate both activation layers
         activation_layer_1 = activations.make_activation(args.act_1)
         activation_layer_2 = activations.make_activation(args.act_2)
+
+        self.counts = jnp.ones(())
 
         # Determine the width of the second linear layer's input.
         second_linear_width = getattr(activation_layer_1, "num_bins", 1) * hidden_size
