@@ -15,8 +15,6 @@ class FTA(eqx.Module):
     num_bins: int
     static_centres: bool
 
-    ### TODO: Add linear tile!
-
     def __init__(self, bound, eta, static_centres=True):
         self.bound = bound
         self.eta = eta

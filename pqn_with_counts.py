@@ -39,7 +39,9 @@ class Transition:
 
 
 class QNetwork(eqx.Module):
-    layers: list
+    block1: list
+    block2: list
+    value_head: list
     counts: Array
 
     def __init__(self, input_size, num_actions, hidden_size, key):
@@ -49,13 +51,15 @@ class QNetwork(eqx.Module):
         activation_layer_1 = activations.make_activation(args.act_1)
         activation_layer_2 = activations.make_activation(args.act_2)
 
-        self.counts = jnp.ones(())
+        # Initialize Counts
+        num_bins_1 = getattr(activation_layer_1, "num_bins", 1)
+        self.counts = jnp.ones((hidden_size, num_bins_1, num_actions))
 
         # Determine the width of the second linear layer's input.
-        second_linear_width = getattr(activation_layer_1, "num_bins", 1) * hidden_size
+        second_linear_width = num_bins_1 * hidden_size
         final_linear_width = getattr(activation_layer_2, "num_bins", 1) * hidden_size
 
-        self.layers = [
+        self.block1 = [
             eqx.nn.Linear(in_features=input_size, out_features=hidden_size, key=key1),
             eqx.nn.LayerNorm(
                 hidden_size,
@@ -63,6 +67,8 @@ class QNetwork(eqx.Module):
                 use_bias=args.learnable_norm_params,
             ),
             activation_layer_1,
+        ]
+        self.block2 = [
             eqx.nn.Lambda(jnp.ravel),
             eqx.nn.Linear(
                 in_features=second_linear_width,
@@ -75,6 +81,8 @@ class QNetwork(eqx.Module):
                 use_bias=args.learnable_norm_params,
             ),
             activation_layer_2,
+        ]
+        self.value_head = [
             eqx.nn.Lambda(jnp.ravel),
             eqx.nn.Linear(
                 in_features=final_linear_width, out_features=num_actions, key=key3
@@ -82,9 +90,18 @@ class QNetwork(eqx.Module):
         ]
 
     def __call__(self, x):
-        for layer in self.layers:
+        for layer in self.block1:
             x = layer(x)
-        return x
+
+        first_activation = x
+
+        for layer in self.block2:
+            x = layer(x)
+
+        for layer in self.value_head:
+            x = layer(x)
+
+        return x, first_activation
 
 
 def make_env(environment_name):
@@ -102,7 +119,7 @@ def make_env(environment_name):
 
 
 def loss(model, states, actions, targets):
-    q_values = jax.vmap(model)(states)
+    q_values, _ = jax.vmap(model)(states)
     index = jnp.arange(q_values.shape[0])
     selected_q_values = q_values[index, actions]
     return 0.5 * jnp.mean((selected_q_values - targets) ** 2), selected_q_values
@@ -207,7 +224,7 @@ def make_run(args):
                     args.num_environments
                 )(subkey, step_env_state, action)
                 # Get next actions
-                next_q_values = jax.vmap(model)(next_state)
+                next_q_values, discrete_states = jax.vmap(model)(next_state)
                 key, subkey = jax.random.split(key, 2)
                 next_action, next_q = epsilon_greedy(subkey, epsilon, next_q_values)
                 scaled_reward = reward * args.reward_scale
