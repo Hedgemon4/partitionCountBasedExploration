@@ -33,7 +33,17 @@ class FTA(eqx.Module):
         term1 = jax.nn.relu(centres - z)
         term2 = jax.nn.relu(z - self.eta - centres)
         combined = term1 + term2
-        return 1.0 - self.fta_indicator(combined)
+
+        left_activation = jnp.minimum(0.0, z + self.bound)
+        right_activation = jnp.maximum(0.0, z - self.bound)
+        boundary_active = (z < -self.bound) | (z > self.bound)
+
+        middle_activation = 1.0 - self.fta_indicator(combined)
+        middle_activation = jnp.where(boundary_active, 0.0, middle_activation)
+
+        final_activation = jnp.concatenate([left_activation, middle_activation, right_activation], axis=-1)
+
+        return final_activation
 
     def fta_indicator(self, x):
         return jnp.where(x < self.eta, x, 0.0) + jnp.where(x > self.eta, 1.0, 0.0)
