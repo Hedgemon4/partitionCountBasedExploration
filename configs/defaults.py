@@ -97,7 +97,7 @@ class CartPoleWithFTAConfig:
     num_seeds: int = 30
     initial_learning_rate: float = 0.0001
     final_learning_rate: float = 1e-20
-    environment: str = "MountainCar-v0"
+    environment: str = "CartPole-v1"
     num_environments: int = 32
     num_steps: int = 64
     total_time_steps: int = 5e5
@@ -113,11 +113,9 @@ class CartPoleWithFTAConfig:
     max_grad_norm: float = 10
     reward_scale: float = 0.1
     num_episodes_for_average: int = 30
-    learnable_norm_params: bool = True
-    sarsa_returns: bool = False
-    bound: float = 20.0
-    eta: float = 2.0
-    metrics_folder_name: str = "pqn_mountaincar_with_fta"
+    learnable_norm_params: bool = False
+    sarsa_returns: bool = True
+    metrics_folder_name: str = "pqn_cartpole_with_fta"
 
     # Network Activation Configs
     act_1: ActivationConfig = field(default_factory=FTAMountainCarConfig)

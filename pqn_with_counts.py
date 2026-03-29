@@ -16,7 +16,7 @@ from jax import Array
 from jax.nn import one_hot
 
 import activations
-from configs.defaults import DefaultMountainCarConfig
+from configs.defaults import DefaultMountainCarConfig, CartPoleWithFTAConfig
 from exploration import epsilon_greedy
 from wrappers import FlattenObservationWrapper, LogWrapper
 
@@ -30,6 +30,7 @@ class Transition:
     state: chex.Array
     action: chex.Array
     reward: chex.Array
+    discrete_state: chex.Array
     selected_q_value: chex.Array
     all_q_values: chex.Array
     next_state: chex.Array
@@ -54,7 +55,7 @@ class QNetwork(eqx.Module):
 
         # Initialize Counts
         num_bins_1 = getattr(activation_layer_1, "num_bins", 1)
-        self.counts = jnp.ones((num_actions, hidden_size, num_bins_1))
+        self.counts =  jnp.ones((num_actions, hidden_size, num_bins_1))
 
         # Determine the width of the second linear layer's input.
         second_linear_width = num_bins_1 * hidden_size
@@ -90,11 +91,25 @@ class QNetwork(eqx.Module):
             ),
         ]
 
+
     def update_counts(self, discrete_states, actions):
-        return
+        updated_counts = self.counts.at[actions].add(discrete_states)
+        return eqx.tree_at(lambda m : m.counts, self, updated_counts)
+
+
+    def get_intrinsic_reward(self, discrete_state, action):
+        # stoch_state = np.repeat(stoch_state, self.num_actions, axis=0)
+        counts = self.counts * discrete_state
+        counts = jnp.sum(counts, axis=-1)
+        counts = jnp.min(counts, axis=-1)
+        reward = jnp.sqrt(2 * jnp.log(jnp.sum(counts, axis=-1)) / counts[action])
+        return reward
 
 
     def __call__(self, x):
+        # Explicitly indicate counts are not trainable
+        jax.lax.stop_gradient(self.counts)
+
         for layer in self.block1:
             x = layer(x)
 
@@ -106,9 +121,11 @@ class QNetwork(eqx.Module):
         for layer in self.value_head:
             x = layer(x)
 
-        priority_layer = first_activation[:, 0] < 0.0
+        # If the left linear tile is active, then it will be negative so won't be chosen by argmax, but should be used as the one hot
+        left_linear_active = first_activation[:, 0] < 0.0
         argmax = jnp.argmax(first_activation, axis=-1)
-        final_indices = jnp.where(priority_layer, 0, argmax)
+        # Either the left linear tile if active, or the argmax of the rest of the tiles
+        final_indices = jnp.where(left_linear_active, 0, argmax)
         discrete_representation = one_hot(final_indices, first_activation.shape[-1])
 
         return x, discrete_representation
@@ -194,6 +211,7 @@ def make_run(args):
             start_env_state,
             start_state,
             initial_action,
+            initial_discrete_state,
             initial_selected_q,
             initial_q_values,
         )
@@ -224,7 +242,7 @@ def make_run(args):
 
             # Step env
             def step(carry, _):
-                key, step_env_state, state, action, selected_q_value, all_q_values = (
+                key, step_env_state, state, action, discrete_state, selected_q_value, all_q_values = (
                     carry
                 )
 
@@ -234,8 +252,7 @@ def make_run(args):
                     args.num_environments
                 )(subkey, step_env_state, action)
                 # Get next actions
-                next_q_values, discrete_states = jax.vmap(model)(next_state)
-                jax.debug.print("Discrete states: {}", discrete_states[0, 0])
+                next_q_values, next_discrete_state = jax.vmap(model)(next_state)
                 key, subkey = jax.random.split(key, 2)
                 next_action, next_q = epsilon_greedy(subkey, epsilon, next_q_values)
                 scaled_reward = reward * args.reward_scale
@@ -244,6 +261,7 @@ def make_run(args):
                     state=state,
                     action=action,
                     reward=scaled_reward,
+                    discrete_state=discrete_state,
                     selected_q_value=selected_q_value,
                     all_q_values=all_q_values,
                     next_state=next_state,
@@ -258,6 +276,7 @@ def make_run(args):
                     step_env_state,
                     next_state,
                     next_action,
+                    next_discrete_state,
                     next_q,
                     next_q_values,
                 ), (
@@ -271,6 +290,9 @@ def make_run(args):
             env_step += args.num_steps * args.num_environments
 
             transitions, infos = intermediate_values
+            flat_states = transitions.discrete_state.reshape(-1, *transitions.discrete_state.shape[-2:])
+            flat_actions = transitions.action.reshape(-1)
+            model = model.update_counts(flat_states, flat_actions)
 
             # Compute Targets
             if args.lambda_returns:
@@ -430,13 +452,16 @@ def make_run(args):
             initial_opt_state,
             episode_metrics,
         )
-        return jax.lax.scan(train_step, training_carry, None, num_updates)
+        final_carry, metrics = jax.lax.scan(train_step, training_carry, None, num_updates)
+        final_model = eqx.combine(final_carry[4], static)
+
+        return final_model.counts, metrics
 
     return run
 
 
 if __name__ == "__main__":
-    args = tyro.cli(DefaultMountainCarConfig)
+    args = tyro.cli(CartPoleWithFTAConfig)
 
     path = "data/" + args.metrics_folder_name + "/"
     if not os.path.exists(path):
@@ -452,9 +477,10 @@ if __name__ == "__main__":
     t0 = time.time()
     rngs = jax.random.split(rng, args.num_seeds)
     compiled_run = jax.jit(jax.vmap(make_run(args)))
-    item1, metrics = jax.block_until_ready(compiled_run(rngs))
+    counts, metrics = jax.block_until_ready(compiled_run(rngs))
     print(f"Took: {time.time() - t0}")
 
     ### TODO: Add better logging of results
     np.savez(path + "metrics.npz", **metrics)
     print("Finished Run")
+    print(counts)
