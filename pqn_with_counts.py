@@ -31,6 +31,7 @@ class Transition:
     action: chex.Array
     reward: chex.Array
     discrete_state: chex.Array
+    intrinsic_reward: chex.Array
     selected_q_value: chex.Array
     all_q_values: chex.Array
     next_state: chex.Array
@@ -256,12 +257,14 @@ def make_run(args):
                 key, subkey = jax.random.split(key, 2)
                 next_action, next_q = epsilon_greedy(subkey, epsilon, next_q_values)
                 scaled_reward = reward * args.reward_scale
+                intrinsic_reward = model.get_intrinsic_reward(discrete_state, action)
 
                 transition = Transition(
                     state=state,
                     action=action,
                     reward=scaled_reward,
                     discrete_state=discrete_state,
+                    intrinsic_reward=intrinsic_reward,
                     selected_q_value=selected_q_value,
                     all_q_values=all_q_values,
                     next_state=next_state,
@@ -482,5 +485,6 @@ if __name__ == "__main__":
 
     ### TODO: Add better logging of results
     np.savez(path + "metrics.npz", **metrics)
+    np.savez(path + "counts.npz", **counts)
     print("Finished Run")
     print(counts)
