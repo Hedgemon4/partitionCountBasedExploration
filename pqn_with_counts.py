@@ -1,4 +1,3 @@
-
 import dataclasses
 import os
 import time
@@ -41,6 +40,20 @@ class Transition:
     done: chex.Array
 
 
+@chex.dataclass(frozen=True)
+class EMAMetrics:
+    ema_alpha: float
+    extrinsic_return_ema: float
+    intrinsic_return_ema: float
+    episode_length_ema: float
+
+
+@chex.dataclass(frozen=True)
+class IntrinsicRewardData:
+    intrinsic_return: Array
+    returned_intrinsic_return: Array
+
+
 class QNetwork(eqx.Module):
     block1: list
     block2: list
@@ -56,7 +69,7 @@ class QNetwork(eqx.Module):
 
         # Initialize Counts
         num_bins_1 = getattr(activation_layer_1, "num_bins", 1)
-        self.counts =  jnp.ones((num_actions, hidden_size, num_bins_1))
+        self.counts = jnp.ones((num_actions, hidden_size, num_bins_1))
 
         # Determine the width of the second linear layer's input.
         second_linear_width = num_bins_1 * hidden_size
@@ -92,20 +105,16 @@ class QNetwork(eqx.Module):
             ),
         ]
 
-
     def update_counts(self, discrete_states, actions):
         updated_counts = self.counts.at[actions].add(discrete_states)
-        return eqx.tree_at(lambda m : m.counts, self, updated_counts)
-
+        return eqx.tree_at(lambda m: m.counts, self, updated_counts)
 
     def get_intrinsic_reward(self, discrete_state, action):
-        # stoch_state = np.repeat(stoch_state, self.num_actions, axis=0)
         counts = self.counts * discrete_state
         counts = jnp.sum(counts, axis=-1)
         counts = jnp.min(counts, axis=-1)
         reward = jnp.sqrt(2 * jnp.log(jnp.sum(counts, axis=-1)) / counts[action])
         return reward
-
 
     def __call__(self, x):
         # Explicitly indicate counts are not trainable
@@ -207,6 +216,13 @@ def make_run(args):
         initial_action, initial_selected_q = epsilon_greedy(
             subkey, args.epsilon_start, initial_q_values
         )
+
+        # Initialize structure for computing intrinsic return metrics
+        initial_intrinsic_returns = IntrinsicRewardData(
+            intrinsic_return=jnp.zeros_like(initial_selected_q),
+            returned_intrinsic_return=jnp.zeros_like(initial_selected_q),
+        )
+
         initial_env_carry = (
             key,
             start_env_state,
@@ -215,12 +231,15 @@ def make_run(args):
             initial_discrete_state,
             initial_selected_q,
             initial_q_values,
+            initial_intrinsic_returns,
         )
 
-        episode_return_ema = 0.0
-        episode_length_ema = 0.0
-        ema_alpha = 2 / (args.num_episodes_for_average + 1)
-        episode_metrics = (episode_return_ema, episode_length_ema)
+        episode_metrics = EMAMetrics(
+            ema_alpha=2 / (args.num_episodes_for_average + 1),
+            extrinsic_return_ema=0.0,
+            intrinsic_return_ema=0.0,
+            episode_length_ema=0.0,
+        )
 
         step_number = 0
         env_step = 0
@@ -243,9 +262,16 @@ def make_run(args):
 
             # Step env
             def step(carry, _):
-                key, step_env_state, state, action, discrete_state, selected_q_value, all_q_values = (
-                    carry
-                )
+                (
+                    key,
+                    step_env_state,
+                    state,
+                    action,
+                    discrete_state,
+                    selected_q_value,
+                    all_q_values,
+                    intrinsic_returns,
+                ) = carry
 
                 # Step Environment
                 key, subkey = jax.random.split(key, 2)
@@ -257,7 +283,27 @@ def make_run(args):
                 key, subkey = jax.random.split(key, 2)
                 next_action, next_q = epsilon_greedy(subkey, epsilon, next_q_values)
                 scaled_reward = reward * args.reward_scale
-                intrinsic_reward = model.get_intrinsic_reward(discrete_state, action)
+
+                # Compute intrinsic reward
+                intrinsic_reward = jax.vmap(model.get_intrinsic_reward)(
+                    discrete_state, action
+                )
+
+                # Update intrinsic return metrics
+                new_intrinsic_return = (
+                    intrinsic_returns.intrinsic_return + intrinsic_reward
+                )
+                updated_intrinsic_returns = IntrinsicRewardData(
+                    intrinsic_return=new_intrinsic_return * (1 - done),
+                    returned_intrinsic_return=intrinsic_returns.returned_intrinsic_return
+                    * (1 - done)
+                    + new_intrinsic_return * done,
+                )
+
+                # Add to info for logging
+                info["returned_intrinsic_returns"] = (
+                    updated_intrinsic_returns.returned_intrinsic_return
+                )
 
                 transition = Transition(
                     state=state,
@@ -282,6 +328,7 @@ def make_run(args):
                     next_discrete_state,
                     next_q,
                     next_q_values,
+                    updated_intrinsic_returns,
                 ), (
                     transition,
                     info,
@@ -293,7 +340,9 @@ def make_run(args):
             env_step += args.num_steps * args.num_environments
 
             transitions, infos = intermediate_values
-            flat_states = transitions.discrete_state.reshape(-1, *transitions.discrete_state.shape[-2:])
+            flat_states = transitions.discrete_state.reshape(
+                -1, *transitions.discrete_state.shape[-2:]
+            )
             flat_actions = transitions.action.reshape(-1)
             model = model.update_counts(flat_states, flat_actions)
 
@@ -330,7 +379,6 @@ def make_run(args):
                     reverse=True,
                 )
                 update_targets = jnp.concatenate((targets, initial_return[np.newaxis]))
-                # update_targets = targets
             else:
 
                 def targets(transition, gamma):
@@ -395,8 +443,6 @@ def make_run(args):
             epoch_key, epoch_params, epoch_opt_state = epoch_outs
             step_number += 1
 
-            ### TODO: Compute episode return metrics based on discussion with Mike
-
             metrics = {
                 "env_step": env_step,
                 "update_steps": step_number,
@@ -408,20 +454,39 @@ def make_run(args):
             # Compute EMA of episode returns and lengths
 
             is_done = infos["returned_episode"]
-            episode_returns = infos["returned_episode_returns"]
+            extrinsic_episode_returns = infos["returned_episode_returns"]
+            intrinsic_episode_returns = infos["returned_intrinsic_returns"]
             episode_lengths = infos["returned_episode_lengths"]
             num_dones = is_done.sum()
 
-            returns_ema, lengths_ema = train_episode_metrics
+            effective_alpha = 1 - (1 - train_episode_metrics.ema_alpha) ** num_dones
 
-            mean_episode_return = jnp.sum(is_done * episode_returns) / jnp.maximum(
-                num_dones, 1
-            )
-            effective_alpha = 1 - (1 - ema_alpha) ** num_dones
-            updated_returns_ema = jnp.where(
+            mean_extrinsic_episode_return = jnp.sum(
+                is_done * extrinsic_episode_returns
+            ) / jnp.maximum(num_dones, 1)
+            updated_extrinsic_return_ema = jnp.where(
                 num_dones > 0,
-                returns_ema + effective_alpha * (mean_episode_return - returns_ema),
-                returns_ema,
+                train_episode_metrics.extrinsic_return_ema
+                + effective_alpha
+                * (
+                    mean_extrinsic_episode_return
+                    - train_episode_metrics.extrinsic_return_ema
+                ),
+                train_episode_metrics.extrinsic_return_ema,
+            )
+
+            mean_intrinsic_episode_return = jnp.sum(
+                is_done * intrinsic_episode_returns
+            ) / jnp.maximum(num_dones, 1)
+            updated_intrinsic_return_ema = jnp.where(
+                num_dones > 0,
+                train_episode_metrics.intrinsic_return_ema
+                + effective_alpha
+                * (
+                    mean_intrinsic_episode_return
+                    - train_episode_metrics.intrinsic_return_ema
+                ),
+                train_episode_metrics.intrinsic_return_ema,
             )
 
             mean_episode_length = jnp.sum(is_done * episode_lengths) / jnp.maximum(
@@ -429,12 +494,23 @@ def make_run(args):
             )
             updated_episode_lengths_ema = jnp.where(
                 num_dones > 0,
-                lengths_ema + effective_alpha * (mean_episode_length - lengths_ema),
-                lengths_ema,
+                train_episode_metrics.episode_length_ema
+                + effective_alpha
+                * (mean_episode_length - train_episode_metrics.episode_length_ema),
+                train_episode_metrics.episode_length_ema,
             )
 
-            metrics["moving_avg_return"] = updated_returns_ema
-            metrics["moving_avg_length"] = updated_episode_lengths_ema
+            # Update train episode metrics
+            updated_episode_metrics = EMAMetrics(
+                ema_alpha=train_episode_metrics.ema_alpha,
+                extrinsic_return_ema=updated_extrinsic_return_ema,
+                intrinsic_return_ema=updated_intrinsic_return_ema,
+                episode_length_ema=updated_episode_lengths_ema,
+            )
+
+            metrics["extrinsic_return_ema"] = updated_extrinsic_return_ema
+            metrics["length_ema"] = updated_episode_lengths_ema
+            metrics["intrinsic_return_ema"] = updated_intrinsic_return_ema
 
             return (
                 epoch_key,
@@ -443,7 +519,7 @@ def make_run(args):
                 final_env_carry,
                 epoch_params,
                 epoch_opt_state,
-                (updated_returns_ema, updated_episode_lengths_ema),
+                updated_episode_metrics,
             ), metrics
 
         training_carry = (
@@ -455,7 +531,9 @@ def make_run(args):
             initial_opt_state,
             episode_metrics,
         )
-        final_carry, metrics = jax.lax.scan(train_step, training_carry, None, num_updates)
+        final_carry, metrics = jax.lax.scan(
+            train_step, training_carry, None, num_updates
+        )
         final_model = eqx.combine(final_carry[4], static)
 
         return final_model.counts, metrics
@@ -483,8 +561,6 @@ if __name__ == "__main__":
     counts, metrics = jax.block_until_ready(compiled_run(rngs))
     print(f"Took: {time.time() - t0}")
 
-    ### TODO: Add better logging of results
     np.savez(path + "metrics.npz", **metrics)
     np.savez(path + "counts.npz", **counts)
     print("Finished Run")
-    print(counts)
