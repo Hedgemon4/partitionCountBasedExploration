@@ -91,6 +91,7 @@ class DefaultMountainCarConfig:
     act_1: ActivationConfig = field(default_factory=FTAMountainCarConfig)
     act_2: ActivationConfig = field(default_factory=ReLUConfig)
 
+
 @chex.dataclass(frozen=True)
 class CartPoleWithFTAConfig:
     seed: int = 0
@@ -106,7 +107,7 @@ class CartPoleWithFTAConfig:
     epsilon_decay: float = 0.2
     num_epochs: int = 4
     num_minibatches: int = 16
-    hidden_size: int = 256
+    hidden_size: int = 128
     gamma: float = 0.99
     lambda_returns: bool = True
     lam: float = 0.95
@@ -120,4 +121,3 @@ class CartPoleWithFTAConfig:
     # Network Activation Configs
     act_1: ActivationConfig = field(default_factory=FTAMountainCarConfig)
     act_2: ActivationConfig = field(default_factory=ReLUConfig)
-

@@ -42,7 +42,9 @@ class FTA(eqx.Module):
         middle_activation = 1.0 - self.fta_indicator(combined)
         middle_activation = jnp.where(boundary_active, 0.0, middle_activation)
 
-        final_activation = jnp.concatenate([left_activation, middle_activation, right_activation], axis=-1)
+        final_activation = jnp.concatenate(
+            [left_activation, middle_activation, right_activation], axis=-1
+        )
 
         return final_activation
 
