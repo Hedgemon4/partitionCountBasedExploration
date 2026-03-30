@@ -562,5 +562,5 @@ if __name__ == "__main__":
     print(f"Took: {time.time() - t0}")
 
     np.savez(path + "metrics.npz", **metrics)
-    np.savez(path + "counts.npz", **counts)
+    np.save(path + "counts.npy", counts)
     print("Finished Run")
