@@ -11,6 +11,6 @@ virtualenv --no-download $SLURM_TMPDIR/env
 source $SLURM_TMPDIR/env/bin/activate
 python -m pip install --no-index --upgrade pip
 
-python -m pip install -U --no-index -r pre_torch_reqs.txt
+python -m pip install -U --no-index -r reqs_testing.txt
 
 python pqn_with_counts.py
