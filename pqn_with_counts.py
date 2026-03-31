@@ -15,7 +15,7 @@ from jax import Array
 from jax.nn import one_hot
 
 import activations
-from configs.defaults import DefaultMountainCarConfig, CartPoleWithFTAConfig
+import configs.defaults as configs
 from exploration import epsilon_greedy
 from wrappers import FlattenObservationWrapper, LogWrapper
 
@@ -351,7 +351,7 @@ def make_run(args):
                 # TODO: These targets still might be wrong
                 def lambda_targets(carry, transition):
                     target, next_q = carry
-                    updated_target = transition.reward + (
+                    updated_target = transition.reward + args.beta * transition.intrinsic_reward * (
                         1 - transition.done
                     ) * args.gamma * (args.lam * target + (1 - args.lam) * next_q)
                     next_q = (
@@ -370,7 +370,7 @@ def make_run(args):
                 last_q_value = last_q_value * (
                     1 - transitions.done[-1]
                 )  # If done, then no q value
-                initial_return = transitions.reward[-1] + args.gamma * last_q_value
+                initial_return = transitions.reward[-1] + args.beta * transitions.intrinsic_reward[-1] + args.gamma * last_q_value
                 carry = (initial_return, last_q_value)
                 final_target_carry, targets = jax.lax.scan(
                     lambda_targets,
@@ -542,7 +542,7 @@ def make_run(args):
 
 
 if __name__ == "__main__":
-    args = tyro.cli(CartPoleWithFTAConfig)
+    args = tyro.cli(configs.CartPoleWithIntrinsicRewardsConfig)
 
     path = "data/" + args.metrics_folder_name + "/"
     if not os.path.exists(path):
