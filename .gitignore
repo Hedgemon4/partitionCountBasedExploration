@@ -206,9 +206,15 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# Other
+# Seth things
 .idea
 scratch.py
 scratch_notebook.ipynb
+
+# Outputs
 data
 graphs
+
+# For cluster
+run_outputs
+
