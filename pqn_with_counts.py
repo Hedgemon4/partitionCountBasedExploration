@@ -559,7 +559,7 @@ if __name__ == "__main__":
     rngs = jax.random.split(rng, args.num_seeds)
     compiled_run = jax.jit(jax.vmap(make_run(args)))
     counts, metrics = jax.block_until_ready(compiled_run(rngs))
-    print(f"Took: {time.time() - t0}")
+    print(f"Total time: {time.time() - t0}")
 
     np.savez(path + "metrics.npz", **metrics)
     np.save(path + "counts.npy", counts)
