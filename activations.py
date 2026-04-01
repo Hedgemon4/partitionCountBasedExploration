@@ -3,12 +3,12 @@ import jax.numpy as jnp
 import jax
 import equinox as eqx
 
-from configs.activations import ActivationConfig, FTAConfig, ElephantConfig, ReLUConfig
+from configs.activations import BaseActivationConfig, FTA, Elephant, Relu
 
 ### Talked to quinn about sparsity; later layers less sparse?
 
 
-class FTA(eqx.Module):
+class FuzzyTilingActivation(eqx.Module):
     centres: Array
     bound: float
     eta: float
@@ -89,13 +89,13 @@ class TiledElephantActivation(eqx.Module):
         return self.h[:, None] / (1 + jnp.abs(z - centres / self.a[:, None]) ** self.d)
 
 
-def make_activation(config: ActivationConfig):
-    if isinstance(config, FTAConfig):
-        return FTA(
+def make_activation(config: BaseActivationConfig):
+    if isinstance(config, FTA):
+        return FuzzyTilingActivation(
             bound=config.bound, eta=config.eta, static_centres=config.static_centres
         )
-    elif isinstance(config, ElephantConfig):
-        return ElephantActivation(a=config.a, h=config.h, d=config.d)
-    elif isinstance(config, ReLUConfig):
+    elif isinstance(config, Elephant):
+        return Elephant(a=config.a, h=config.h, d=config.d)
+    elif isinstance(config, Relu):
         return eqx.nn.Lambda(jax.nn.relu)
     raise ValueError(f"Unknown config: {type(config)}")

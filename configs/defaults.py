@@ -1,8 +1,9 @@
 import chex
 
-from configs.activations import ActivationConfig, FTAMountainCarConfig
+from configs.activations import ActivationConfig
 from dataclasses import field
-from configs.activations import FTAConfig, ReLUConfig
+from configs.activations import FTA, Relu
+from configs.exploration import ExplorationConfig
 
 
 @chex.dataclass(frozen=True)
@@ -88,8 +89,8 @@ class DefaultMountainCarConfig:
     metrics_folder_name: str = "pqn_mountaincar_with_fta"
 
     # Network Activation Configs
-    act_1: ActivationConfig = field(default_factory=FTAMountainCarConfig)
-    act_2: ActivationConfig = field(default_factory=ReLUConfig)
+    act_1: ActivationConfig = field(default_factory=FTA)
+    act_2: ActivationConfig = field(default_factory=Relu)
 
 
 @chex.dataclass(frozen=True)
@@ -119,8 +120,8 @@ class CartPoleWithFTAConfig:
     metrics_folder_name: str = "pqn_cartpole_with_fta"
 
     # Network Activation Configs
-    act_1: ActivationConfig = field(default_factory=FTAMountainCarConfig)
-    act_2: ActivationConfig = field(default_factory=ReLUConfig)
+    act_1: ActivationConfig = FTA()
+    act_2: ActivationConfig = Relu()
 
 
 @chex.dataclass(frozen=True)
@@ -145,11 +146,13 @@ class CartPoleWithIntrinsicRewardsConfig:
     max_grad_norm: float = 10
     reward_scale: float = 0.1
     num_episodes_for_average: int = 30
-    beta = 0.1
     learnable_norm_params: bool = False
     sarsa_returns: bool = True
     metrics_folder_name: str = "pqn_cartpole_with_fta_intrinsic_rewards"
 
     # Network Activation Configs
-    act_1: ActivationConfig = field(default_factory=FTAMountainCarConfig)
-    act_2: ActivationConfig = field(default_factory=ReLUConfig)
+    act_1: ActivationConfig = FTA()
+    act_2: ActivationConfig = Relu()
+
+    # Count Configuration
+    exploration: ExplorationConfig = ExplorationConfig()
