@@ -15,6 +15,7 @@ from wrappers import FlattenObservationWrapper, LogWrapper
 
 """
 PQN implementation based on https://github.com/mttga/purejaxql/blob/main/purejaxql/pqn_gymnax.py
+Uses the same hyperparameters, weight initialization, etc as the original PQN implementation
 """
 
 
