@@ -27,4 +27,5 @@ class Elephant(BaseActivationConfig):
 class Relu(BaseActivationConfig):
     type: Literal["relu"] = "relu"
 
+
 ActivationConfig = Union[FTA, Elephant, Relu]

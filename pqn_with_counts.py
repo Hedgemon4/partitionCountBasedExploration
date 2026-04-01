@@ -79,10 +79,14 @@ class QNetwork(eqx.Module):
         elif self.count_layer == 2:
             number_of_discrete_states = num_bins_2
         else:
-            raise ValueError("Count layer must be either 1 or 2, indicating which activation layer to use for the discrete representation")
+            raise ValueError(
+                "Count layer must be either 1 or 2, indicating which activation layer to use for the discrete representation"
+            )
 
         if number_of_discrete_states < 2:
-            raise ValueError("Count layer must have at least two bins to have a discrete representation")
+            raise ValueError(
+                "Count layer must have at least two bins to have a discrete representation"
+            )
 
         self.counts = jnp.ones((num_actions, hidden_size, number_of_discrete_states))
 
@@ -149,7 +153,9 @@ class QNetwork(eqx.Module):
             x = layer(x)
 
         # Depending on which layer is being used for counts, select the appropriate activation for the discrete representation
-        discrete_activation = first_activation if self.count_layer == 1 else second_activation
+        discrete_activation = (
+            first_activation if self.count_layer == 1 else second_activation
+        )
 
         # If the left linear tile is active, then it will be negative so won't be chosen by argmax, but should be used as the one hot
         left_linear_active = discrete_activation[:, 0] < 0.0
@@ -372,9 +378,14 @@ def make_run(args):
                 # TODO: These targets still might be wrong
                 def lambda_targets(carry, transition):
                     target, next_q = carry
-                    updated_target = transition.reward + args.exploration.beta * transition.intrinsic_reward * (
-                        1 - transition.done
-                    ) * args.gamma * (args.lam * target + (1 - args.lam) * next_q)
+                    updated_target = (
+                        transition.reward
+                        + args.exploration.beta
+                        * transition.intrinsic_reward
+                        * (1 - transition.done)
+                        * args.gamma
+                        * (args.lam * target + (1 - args.lam) * next_q)
+                    )
                     next_q = (
                         transition.selected_q_value
                         if args.sarsa_returns
@@ -391,7 +402,11 @@ def make_run(args):
                 last_q_value = last_q_value * (
                     1 - transitions.done[-1]
                 )  # If done, then no q value
-                initial_return = transitions.reward[-1] + args.exploration.beta * transitions.intrinsic_reward[-1] + args.gamma * last_q_value
+                initial_return = (
+                    transitions.reward[-1]
+                    + args.exploration.beta * transitions.intrinsic_reward[-1]
+                    + args.gamma * last_q_value
+                )
                 carry = (initial_return, last_q_value)
                 final_target_carry, targets = jax.lax.scan(
                     lambda_targets,
@@ -563,7 +578,10 @@ def make_run(args):
 
 
 if __name__ == "__main__":
-    args = tyro.cli(configs.CartPoleWithIntrinsicRewardsConfig, config=(tyro.conf.CascadeSubcommandArgs,))
+    args = tyro.cli(
+        configs.CartPoleWithIntrinsicRewardsConfig,
+        config=(tyro.conf.CascadeSubcommandArgs,),
+    )
 
     path = "data/" + args.metrics_folder_name + "/"
     if not os.path.exists(path):
