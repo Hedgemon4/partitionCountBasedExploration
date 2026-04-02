@@ -8,13 +8,13 @@ from pathlib import Path
 
 @dataclass
 class Args:
-    """Refactored plotting script to compare multiple PQN runs using tyro."""
+    """Refactored plotting script to find and compare PQN runs automatically."""
 
-    # List of .npz files to plot
-    files: List[Path]
+    # The root directory to search for metrics.npz files
+    root_dir: Path = Path("data/cartpole_beta_sweep")
 
-    # Custom labels for the legend. If not provided, filenames are used.
-    labels: Optional[List[str]] = None
+    # The filename to look for in subdirectories
+    filename_pattern: str = "metrics.npz"
 
     # The key in the .npz file to visualize
     metric: str = "extrinsic_return_ema"
@@ -23,7 +23,7 @@ class Args:
     smooth: int = 1
 
     # Path to save the resulting plot
-    output: Path = Path("comparison_plot.png")
+    output: Path = Path("beta_comparison_plot.png")
 
     # Title of the plot
     title: Optional[str] = None
@@ -68,15 +68,21 @@ def process_metrics(filename: Path, metric_name: str, smooth_window: int):
 
 
 def main(args: Args) -> None:
+    # 1. Automatically find all matching files in child directories
+    file_paths = sorted(list(args.root_dir.rglob(args.filename_pattern)))
+
+    if not file_paths:
+        print(f"No files found matching '{args.filename_pattern}' in {args.root_dir}")
+        return
+
+    print(f"Found {len(file_paths)} runs. Plotting...")
+
     plt.figure(figsize=(10, 6))
+    colors = plt.cm.get_cmap("tab10", len(file_paths))
 
-    # Color palette for distinct lines
-    colors = plt.cm.get_cmap("tab10", len(args.files))
-
-    for i, file_path in enumerate(args.files):
-        label = (
-            args.labels[i] if args.labels and i < len(args.labels) else file_path.stem
-        )
+    for i, file_path in enumerate(file_paths):
+        # Use the parent directory name as the label (e.g., 'beta_0.01')
+        label = file_path.parent.name
 
         steps, mean, ci = process_metrics(file_path, args.metric, args.smooth)
 
@@ -90,8 +96,9 @@ def main(args: Args) -> None:
     plt.legend()
     plt.grid(True, linestyle="--", alpha=0.7)
 
-    plt.savefig(args.output)
-    print(f" Plot saved to {args.output}")
+    save_path = Path("graphs", args.output)
+    plt.savefig(save_path )
+    print(f"Plot saved to {save_path}")
 
 
 if __name__ == "__main__":

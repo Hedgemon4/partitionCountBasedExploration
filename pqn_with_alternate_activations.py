@@ -11,18 +11,14 @@ import tyro
 import gymnax
 import chex
 import yaml
-from jax import Array
-from jax.nn import one_hot
 
 import activations
-import configs.defaults as configs
+from configs.defaults import DefaultMountainCarConfig, CartPoleWithFTAConfig
 from exploration import epsilon_greedy
 from wrappers import FlattenObservationWrapper, LogWrapper
 
 """
 PQN implementation based on https://github.com/mttga/purejaxql/blob/main/purejaxql/pqn_gymnax.py
-
-Adds in one-to-many activations and count-based intrinsic rewards.
 """
 
 
@@ -31,8 +27,6 @@ class Transition:
     state: chex.Array
     action: chex.Array
     reward: chex.Array
-    discrete_state: chex.Array
-    intrinsic_reward: chex.Array
     selected_q_value: chex.Array
     all_q_values: chex.Array
     next_state: chex.Array
@@ -42,61 +36,21 @@ class Transition:
     done: chex.Array
 
 
-@chex.dataclass(frozen=True)
-class EMAMetrics:
-    ema_alpha: float
-    extrinsic_return_ema: float
-    intrinsic_return_ema: float
-    episode_length_ema: float
-
-
-@chex.dataclass(frozen=True)
-class IntrinsicRewardData:
-    intrinsic_return: Array
-    returned_intrinsic_return: Array
-
-
 class QNetwork(eqx.Module):
-    block1: list
-    block2: list
-    value_head: list
-    counts: Array
-    count_layer: int
+    layers: list
 
-    def __init__(self, input_size, num_actions, hidden_size, count_layer, key):
+    def __init__(self, input_size, num_actions, hidden_size, key):
         key1, key2, key3 = jax.random.split(key, 3)
-
-        self.count_layer = count_layer
 
         # Instantiate both activation layers
         activation_layer_1 = activations.make_activation(args.act_1)
         activation_layer_2 = activations.make_activation(args.act_2)
 
-        # Initialize Counts
-        num_bins_1 = getattr(activation_layer_1, "num_bins", 1)
-        num_bins_2 = getattr(activation_layer_2, "num_bins", 1)
-
-        if self.count_layer == 1:
-            number_of_discrete_states = num_bins_1
-        elif self.count_layer == 2:
-            number_of_discrete_states = num_bins_2
-        else:
-            raise ValueError(
-                "Count layer must be either 1 or 2, indicating which activation layer to use for the discrete representation"
-            )
-
-        if number_of_discrete_states < 2:
-            raise ValueError(
-                "Count layer must have at least two bins to have a discrete representation"
-            )
-
-        self.counts = jnp.ones((num_actions, hidden_size, number_of_discrete_states))
-
         # Determine the width of the second linear layer's input.
-        second_linear_width = num_bins_1 * hidden_size
-        final_linear_width = num_bins_2 * hidden_size
+        second_linear_width = getattr(activation_layer_1, "num_bins", 1) * hidden_size
+        final_linear_width = getattr(activation_layer_2, "num_bins", 1) * hidden_size
 
-        self.block1 = [
+        self.layers = [
             eqx.nn.Linear(in_features=input_size, out_features=hidden_size, key=key1),
             eqx.nn.LayerNorm(
                 hidden_size,
@@ -104,8 +58,6 @@ class QNetwork(eqx.Module):
                 use_bias=args.learnable_norm_params,
             ),
             activation_layer_1,
-        ]
-        self.block2 = [
             eqx.nn.Lambda(jnp.ravel),
             eqx.nn.Linear(
                 in_features=second_linear_width,
@@ -118,55 +70,16 @@ class QNetwork(eqx.Module):
                 use_bias=args.learnable_norm_params,
             ),
             activation_layer_2,
-        ]
-        self.value_head = [
             eqx.nn.Lambda(jnp.ravel),
             eqx.nn.Linear(
                 in_features=final_linear_width, out_features=num_actions, key=key3
             ),
         ]
 
-    def update_counts(self, discrete_states, actions):
-        updated_counts = self.counts.at[actions].add(discrete_states)
-        return eqx.tree_at(lambda m: m.counts, self, updated_counts)
-
-    def get_intrinsic_reward(self, discrete_state, action):
-        counts = self.counts * discrete_state
-        counts = jnp.sum(counts, axis=-1)
-        counts = jnp.min(counts, axis=-1)
-        reward = jnp.sqrt(2 * jnp.log(jnp.sum(counts, axis=-1)) / counts[action])
-        return reward
-
     def __call__(self, x):
-        # Explicitly indicate counts are not trainable
-        jax.lax.stop_gradient(self.counts)
-
-        for layer in self.block1:
+        for layer in self.layers:
             x = layer(x)
-
-        first_activation = x
-
-        for layer in self.block2:
-            x = layer(x)
-
-        second_activation = x
-
-        for layer in self.value_head:
-            x = layer(x)
-
-        # Depending on which layer is being used for counts, select the appropriate activation for the discrete representation
-        discrete_activation = (
-            first_activation if self.count_layer == 1 else second_activation
-        )
-
-        # If the left linear tile is active, then it will be negative so won't be chosen by argmax, but should be used as the one hot
-        left_linear_active = discrete_activation[:, 0] < 0.0
-        argmax = jnp.argmax(discrete_activation, axis=-1)
-        # Either the left linear tile if active, or the argmax of the rest of the tiles
-        final_indices = jnp.where(left_linear_active, 0, argmax)
-        discrete_representation = one_hot(final_indices, discrete_activation.shape[-1])
-
-        return x, discrete_representation
+        return x
 
 
 def make_env(environment_name):
@@ -184,7 +97,7 @@ def make_env(environment_name):
 
 
 def loss(model, states, actions, targets):
-    q_values, _ = jax.vmap(model)(states)
+    q_values = jax.vmap(model)(states)
     index = jnp.arange(q_values.shape[0])
     selected_q_values = q_values[index, actions]
     return 0.5 * jnp.mean((selected_q_values - targets) ** 2), selected_q_values
@@ -207,7 +120,6 @@ def make_run(args):
             input_size=input_size,
             num_actions=num_actions,
             hidden_size=args.hidden_size,
-            count_layer=args.exploration.count_layer,
             key=subkey,
         )
 
@@ -240,35 +152,24 @@ def make_run(args):
         start_state, start_env_state = vmap_reset(args.num_environments)(subkey)
 
         # Get first actions
-        initial_q_values, initial_discrete_state = jax.vmap(initial_model)(start_state)
+        initial_q_values = jax.vmap(initial_model)(start_state)
         key, subkey = jax.random.split(key, 2)
         initial_action, initial_selected_q = epsilon_greedy(
             subkey, args.epsilon_start, initial_q_values
         )
-
-        # Initialize structure for computing intrinsic return metrics
-        initial_intrinsic_returns = IntrinsicRewardData(
-            intrinsic_return=jnp.zeros_like(initial_selected_q),
-            returned_intrinsic_return=jnp.zeros_like(initial_selected_q),
-        )
-
         initial_env_carry = (
             key,
             start_env_state,
             start_state,
             initial_action,
-            initial_discrete_state,
             initial_selected_q,
             initial_q_values,
-            initial_intrinsic_returns,
         )
 
-        episode_metrics = EMAMetrics(
-            ema_alpha=2 / (args.num_episodes_for_average + 1),
-            extrinsic_return_ema=0.0,
-            intrinsic_return_ema=0.0,
-            episode_length_ema=0.0,
-        )
+        episode_return_ema = 0.0
+        episode_length_ema = 0.0
+        ema_alpha = 2 / (args.num_episodes_for_average + 1)
+        episode_metrics = (episode_return_ema, episode_length_ema)
 
         step_number = 0
         env_step = 0
@@ -291,16 +192,9 @@ def make_run(args):
 
             # Step env
             def step(carry, _):
-                (
-                    key,
-                    step_env_state,
-                    state,
-                    action,
-                    discrete_state,
-                    selected_q_value,
-                    all_q_values,
-                    intrinsic_returns,
-                ) = carry
+                key, step_env_state, state, action, selected_q_value, all_q_values = (
+                    carry
+                )
 
                 # Step Environment
                 key, subkey = jax.random.split(key, 2)
@@ -308,38 +202,15 @@ def make_run(args):
                     args.num_environments
                 )(subkey, step_env_state, action)
                 # Get next actions
-                next_q_values, next_discrete_state = jax.vmap(model)(next_state)
+                next_q_values = jax.vmap(model)(next_state)
                 key, subkey = jax.random.split(key, 2)
                 next_action, next_q = epsilon_greedy(subkey, epsilon, next_q_values)
                 scaled_reward = reward * args.reward_scale
-
-                # Compute intrinsic reward
-                intrinsic_reward = jax.vmap(model.get_intrinsic_reward)(
-                    discrete_state, action
-                )
-
-                # Update intrinsic return metrics
-                new_intrinsic_return = (
-                    intrinsic_returns.intrinsic_return + intrinsic_reward
-                )
-                updated_intrinsic_returns = IntrinsicRewardData(
-                    intrinsic_return=new_intrinsic_return * (1 - done),
-                    returned_intrinsic_return=intrinsic_returns.returned_intrinsic_return
-                    * (1 - done)
-                    + new_intrinsic_return * done,
-                )
-
-                # Add to info for logging
-                info["returned_intrinsic_returns"] = (
-                    updated_intrinsic_returns.returned_intrinsic_return
-                )
 
                 transition = Transition(
                     state=state,
                     action=action,
                     reward=scaled_reward,
-                    discrete_state=discrete_state,
-                    intrinsic_reward=intrinsic_reward,
                     selected_q_value=selected_q_value,
                     all_q_values=all_q_values,
                     next_state=next_state,
@@ -354,10 +225,8 @@ def make_run(args):
                     step_env_state,
                     next_state,
                     next_action,
-                    next_discrete_state,
                     next_q,
                     next_q_values,
-                    updated_intrinsic_returns,
                 ), (
                     transition,
                     info,
@@ -369,25 +238,15 @@ def make_run(args):
             env_step += args.num_steps * args.num_environments
 
             transitions, infos = intermediate_values
-            flat_states = transitions.discrete_state.reshape(
-                -1, *transitions.discrete_state.shape[-2:]
-            )
-            flat_actions = transitions.action.reshape(-1)
-            model = model.update_counts(flat_states, flat_actions)
 
             # Compute Targets
             if args.lambda_returns:
                 # TODO: These targets still might be wrong
                 def lambda_targets(carry, transition):
                     target, next_q = carry
-                    updated_target = (
-                        transition.reward
-                        + (args.exploration.beta * transition.intrinsic_reward)
-                    ) + (
-                        (1 - transition.done)
-                        * args.gamma
-                        * (args.lam * target + (1 - args.lam) * next_q)
-                    )
+                    updated_target = transition.reward + (
+                        1 - transition.done
+                    ) * args.gamma * (args.lam * target + (1 - args.lam) * next_q)
                     next_q = (
                         transition.selected_q_value
                         if args.sarsa_returns
@@ -404,11 +263,7 @@ def make_run(args):
                 last_q_value = last_q_value * (
                     1 - transitions.done[-1]
                 )  # If done, then no q value
-                initial_return = (
-                    transitions.reward[-1]
-                    + (args.exploration.beta * transitions.intrinsic_reward[-1])
-                    + args.gamma * last_q_value
-                )
+                initial_return = transitions.reward[-1] + args.gamma * last_q_value
                 carry = (initial_return, last_q_value)
                 final_target_carry, targets = jax.lax.scan(
                     lambda_targets,
@@ -417,6 +272,7 @@ def make_run(args):
                     reverse=True,
                 )
                 update_targets = jnp.concatenate((targets, initial_return[np.newaxis]))
+                # update_targets = targets
             else:
 
                 def targets(transition, gamma):
@@ -481,6 +337,8 @@ def make_run(args):
             epoch_key, epoch_params, epoch_opt_state = epoch_outs
             step_number += 1
 
+            ### TODO: Compute episode return metrics based on discussion with Mike
+
             metrics = {
                 "env_step": env_step,
                 "update_steps": step_number,
@@ -492,39 +350,20 @@ def make_run(args):
             # Compute EMA of episode returns and lengths
 
             is_done = infos["returned_episode"]
-            extrinsic_episode_returns = infos["returned_episode_returns"]
-            intrinsic_episode_returns = infos["returned_intrinsic_returns"]
+            episode_returns = infos["returned_episode_returns"]
             episode_lengths = infos["returned_episode_lengths"]
             num_dones = is_done.sum()
 
-            effective_alpha = 1 - (1 - train_episode_metrics.ema_alpha) ** num_dones
+            returns_ema, lengths_ema = train_episode_metrics
 
-            mean_extrinsic_episode_return = jnp.sum(
-                is_done * extrinsic_episode_returns
-            ) / jnp.maximum(num_dones, 1)
-            updated_extrinsic_return_ema = jnp.where(
-                num_dones > 0,
-                train_episode_metrics.extrinsic_return_ema
-                + effective_alpha
-                * (
-                    mean_extrinsic_episode_return
-                    - train_episode_metrics.extrinsic_return_ema
-                ),
-                train_episode_metrics.extrinsic_return_ema,
+            mean_episode_return = jnp.sum(is_done * episode_returns) / jnp.maximum(
+                num_dones, 1
             )
-
-            mean_intrinsic_episode_return = jnp.sum(
-                is_done * intrinsic_episode_returns
-            ) / jnp.maximum(num_dones, 1)
-            updated_intrinsic_return_ema = jnp.where(
+            effective_alpha = 1 - (1 - ema_alpha) ** num_dones
+            updated_returns_ema = jnp.where(
                 num_dones > 0,
-                train_episode_metrics.intrinsic_return_ema
-                + effective_alpha
-                * (
-                    mean_intrinsic_episode_return
-                    - train_episode_metrics.intrinsic_return_ema
-                ),
-                train_episode_metrics.intrinsic_return_ema,
+                returns_ema + effective_alpha * (mean_episode_return - returns_ema),
+                returns_ema,
             )
 
             mean_episode_length = jnp.sum(is_done * episode_lengths) / jnp.maximum(
@@ -532,23 +371,12 @@ def make_run(args):
             )
             updated_episode_lengths_ema = jnp.where(
                 num_dones > 0,
-                train_episode_metrics.episode_length_ema
-                + effective_alpha
-                * (mean_episode_length - train_episode_metrics.episode_length_ema),
-                train_episode_metrics.episode_length_ema,
+                lengths_ema + effective_alpha * (mean_episode_length - lengths_ema),
+                lengths_ema,
             )
 
-            # Update train episode metrics
-            updated_episode_metrics = EMAMetrics(
-                ema_alpha=train_episode_metrics.ema_alpha,
-                extrinsic_return_ema=updated_extrinsic_return_ema,
-                intrinsic_return_ema=updated_intrinsic_return_ema,
-                episode_length_ema=updated_episode_lengths_ema,
-            )
-
-            metrics["extrinsic_return_ema"] = updated_extrinsic_return_ema
-            metrics["length_ema"] = updated_episode_lengths_ema
-            metrics["intrinsic_return_ema"] = updated_intrinsic_return_ema
+            metrics["moving_avg_return"] = updated_returns_ema
+            metrics["moving_avg_length"] = updated_episode_lengths_ema
 
             return (
                 epoch_key,
@@ -557,7 +385,7 @@ def make_run(args):
                 final_env_carry,
                 epoch_params,
                 epoch_opt_state,
-                updated_episode_metrics,
+                (updated_returns_ema, updated_episode_lengths_ema),
             ), metrics
 
         training_carry = (
@@ -569,21 +397,13 @@ def make_run(args):
             initial_opt_state,
             episode_metrics,
         )
-        final_carry, metrics = jax.lax.scan(
-            train_step, training_carry, None, num_updates
-        )
-        final_model = eqx.combine(final_carry[4], static)
-
-        return final_model.counts, metrics
+        return jax.lax.scan(train_step, training_carry, None, num_updates)
 
     return run
 
 
 if __name__ == "__main__":
-    args = tyro.cli(
-        configs.CartPoleWithIntrinsicRewardsConfig,
-        config=(tyro.conf.CascadeSubcommandArgs,),
-    )
+    args = tyro.cli(CartPoleWithFTAConfig)
 
     path = "data/" + args.metrics_folder_name + "/"
     if not os.path.exists(path):
@@ -599,9 +419,9 @@ if __name__ == "__main__":
     t0 = time.time()
     rngs = jax.random.split(rng, args.num_seeds)
     compiled_run = jax.jit(jax.vmap(make_run(args)))
-    counts, metrics = jax.block_until_ready(compiled_run(rngs))
-    print(f"Total time: {time.time() - t0}")
+    item1, metrics = jax.block_until_ready(compiled_run(rngs))
+    print(f"Took: {time.time() - t0}")
 
+    ### TODO: Add better logging of results
     np.savez(path + "metrics.npz", **metrics)
-    np.save(path + "counts.npy", counts)
     print("Finished Run")
