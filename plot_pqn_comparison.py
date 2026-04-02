@@ -23,7 +23,9 @@ class Args:
     smooth: int = 1
 
     # Path to save the resulting plot
-    output: Path = Path("beta_comparison_plot.png")
+    output: Path = Path("cartpole_beta_sweep")
+
+    filename: Path = Path("beta_comparison_plot.png")
 
     # Title of the plot
     title: Optional[str] = None
@@ -96,8 +98,11 @@ def main(args: Args) -> None:
     plt.legend()
     plt.grid(True, linestyle="--", alpha=0.7)
 
-    save_path = Path("graphs", args.output)
-    plt.savefig(save_path )
+    save_folder = Path("graphs", args.output)
+    save_folder.mkdir(parents=True, exist_ok=True)
+
+    save_path = save_folder / args.filename
+    plt.savefig(save_path, dpi=300)
     print(f"Plot saved to {save_path}")
 
 
