@@ -3,7 +3,15 @@ import chex
 from configs.activations import ActivationConfig
 from dataclasses import field
 from configs.activations import FTA, Relu
-from configs.exploration import ExplorationConfig
+from configs.networks import QNetworkCounts, NetworkConfig
+
+
+@chex.dataclass(frozen=True)
+class BaseConfig:
+    # Experiment Configs
+    seed: int = 0
+    num_seeds: int = 30
+    num_episodes_for_average: int = 30
 
 
 @chex.dataclass(frozen=True)
@@ -125,34 +133,65 @@ class CartPoleWithFTAConfig:
 
 
 @chex.dataclass(frozen=True)
-class CartPoleWithIntrinsicRewardsConfig:
-    seed: int = 0
-    num_seeds: int = 30
+class CartPoleWithIntrinsicRewardsConfig(BaseConfig):
+    # Experiment Configs
+    output_folder_name: str = "pqn_cartpole_with_intrinsic_rewards"
+
+    # Algorithm Configs
     initial_learning_rate: float = 0.0001
     final_learning_rate: float = 1e-20
-    environment: str = "CartPole-v1"
-    num_environments: int = 32
-    num_steps: int = 64
-    total_time_steps: int = 5e5
-    epsilon_start: float = 1.0
-    epsilon_end: float = 0.2
-    epsilon_decay: float = 0.2
     num_epochs: int = 4
     num_minibatches: int = 16
-    hidden_size: int = 128
     gamma: float = 0.99
     lambda_returns: bool = True
     lam: float = 0.95
     max_grad_norm: float = 10
     reward_scale: float = 0.1
-    num_episodes_for_average: int = 30
-    learnable_norm_params: bool = False
     sarsa_returns: bool = True
-    metrics_folder_name: str = "pqn_cartpole_with_fta_intrinsic_rewards"
+
+    # Env Configs
+    environment: str = "CartPole-v1"
+    num_environments: int = 32
+    num_steps: int = 64
+    total_time_steps: float = 5e5
+
+    # Exploration Configs
+    beta: float = 0.1
+    epsilon_start: float = 1.0
+    epsilon_end: float = 0.2
+    epsilon_decay: float = 0.2
 
     # Network Activation Configs
-    act_1: ActivationConfig = FTA()
-    act_2: ActivationConfig = Relu()
+    network: NetworkConfig = QNetworkCounts()
 
-    # Count Configuration
-    exploration: ExplorationConfig = ExplorationConfig()
+
+@chex.dataclass(frozen=True)
+class MountainCarWithIntrinsicRewardsConfig(BaseConfig):
+    # Experiment Configs
+    output_folder_name: str = "pqn_mountaincar_with_intrinsic_rewards"
+
+    # Algorithm Configs
+    initial_learning_rate: float = 0.004
+    final_learning_rate: float = 0.004
+    num_epochs: int = 8
+    num_minibatches: int = 16
+    gamma: float = 0.99
+    lambda_returns: bool = True
+    lam: float = 0.95
+    max_grad_norm: float = 10.0
+    sarsa_returns: bool = True
+
+    # Env Configs
+    environment: str = "MountainCar-v0"
+    num_environments: int = 32
+    num_steps: int = 64
+    total_time_steps: float = 5e5
+
+    # Exploration Configs
+    beta: float = 0.1
+    epsilon_start: float = 1.0
+    epsilon_end: float = 0.05
+    epsilon_decay: float = 0.2
+
+    # Network Activation Configs
+    network: NetworkConfig = QNetworkCounts()

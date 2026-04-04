@@ -1,6 +1,7 @@
 import dataclasses
-import os
 import time
+from pathlib import Path
+from typing import Union, Annotated
 
 import equinox as eqx
 import jax
@@ -12,11 +13,10 @@ import gymnax
 import chex
 import yaml
 from jax import Array
-from jax.nn import one_hot
 
-import activations
 import configs.defaults as configs
 from exploration import epsilon_greedy
+from netwoks import QNetwork
 from wrappers import FlattenObservationWrapper, LogWrapper
 
 """
@@ -56,119 +56,6 @@ class IntrinsicRewardData:
     returned_intrinsic_return: Array
 
 
-class QNetwork(eqx.Module):
-    block1: list
-    block2: list
-    value_head: list
-    counts: Array
-    count_layer: int
-
-    def __init__(self, input_size, num_actions, hidden_size, count_layer, key):
-        key1, key2, key3 = jax.random.split(key, 3)
-
-        self.count_layer = count_layer
-
-        # Instantiate both activation layers
-        activation_layer_1 = activations.make_activation(args.act_1)
-        activation_layer_2 = activations.make_activation(args.act_2)
-
-        # Initialize Counts
-        num_bins_1 = getattr(activation_layer_1, "num_bins", 1)
-        num_bins_2 = getattr(activation_layer_2, "num_bins", 1)
-
-        if self.count_layer == 1:
-            number_of_discrete_states = num_bins_1
-        elif self.count_layer == 2:
-            number_of_discrete_states = num_bins_2
-        else:
-            raise ValueError(
-                "Count layer must be either 1 or 2, indicating which activation layer to use for the discrete representation"
-            )
-
-        if number_of_discrete_states < 2:
-            raise ValueError(
-                "Count layer must have at least two bins to have a discrete representation"
-            )
-
-        self.counts = jnp.ones((num_actions, hidden_size, number_of_discrete_states))
-
-        # Determine the width of the second linear layer's input.
-        second_linear_width = num_bins_1 * hidden_size
-        final_linear_width = num_bins_2 * hidden_size
-
-        self.block1 = [
-            eqx.nn.Linear(in_features=input_size, out_features=hidden_size, key=key1),
-            eqx.nn.LayerNorm(
-                hidden_size,
-                use_weight=args.learnable_norm_params,
-                use_bias=args.learnable_norm_params,
-            ),
-            activation_layer_1,
-        ]
-        self.block2 = [
-            eqx.nn.Lambda(jnp.ravel),
-            eqx.nn.Linear(
-                in_features=second_linear_width,
-                out_features=hidden_size,
-                key=key2,
-            ),
-            eqx.nn.LayerNorm(
-                hidden_size,
-                use_weight=args.learnable_norm_params,
-                use_bias=args.learnable_norm_params,
-            ),
-            activation_layer_2,
-        ]
-        self.value_head = [
-            eqx.nn.Lambda(jnp.ravel),
-            eqx.nn.Linear(
-                in_features=final_linear_width, out_features=num_actions, key=key3
-            ),
-        ]
-
-    def update_counts(self, discrete_states, actions):
-        updated_counts = self.counts.at[actions].add(discrete_states)
-        return eqx.tree_at(lambda m: m.counts, self, updated_counts)
-
-    def get_intrinsic_reward(self, discrete_state, action):
-        counts = self.counts * discrete_state
-        counts = jnp.sum(counts, axis=-1)
-        counts = jnp.min(counts, axis=-1)
-        reward = jnp.sqrt(2 * jnp.log(jnp.sum(counts, axis=-1)) / counts[action])
-        return reward
-
-    def __call__(self, x):
-        # Explicitly indicate counts are not trainable
-        jax.lax.stop_gradient(self.counts)
-
-        for layer in self.block1:
-            x = layer(x)
-
-        first_activation = x
-
-        for layer in self.block2:
-            x = layer(x)
-
-        second_activation = x
-
-        for layer in self.value_head:
-            x = layer(x)
-
-        # Depending on which layer is being used for counts, select the appropriate activation for the discrete representation
-        discrete_activation = (
-            first_activation if self.count_layer == 1 else second_activation
-        )
-
-        # If the left linear tile is active, then it will be negative so won't be chosen by argmax, but should be used as the one hot
-        left_linear_active = discrete_activation[:, 0] < 0.0
-        argmax = jnp.argmax(discrete_activation, axis=-1)
-        # Either the left linear tile if active, or the argmax of the rest of the tiles
-        final_indices = jnp.where(left_linear_active, 0, argmax)
-        discrete_representation = one_hot(final_indices, discrete_activation.shape[-1])
-
-        return x, discrete_representation
-
-
 def make_env(environment_name):
     env, env_params = gymnax.make(environment_name)
     env = FlattenObservationWrapper(env)
@@ -206,9 +93,8 @@ def make_run(args):
         initial_model = QNetwork(
             input_size=input_size,
             num_actions=num_actions,
-            hidden_size=args.hidden_size,
-            count_layer=args.exploration.count_layer,
             key=subkey,
+            network_config=args.network,
         )
 
         optim = optax.chain(
@@ -381,8 +267,7 @@ def make_run(args):
                 def lambda_targets(carry, transition):
                     target, next_q = carry
                     updated_target = (
-                        transition.reward
-                        + (args.exploration.beta * transition.intrinsic_reward)
+                        transition.reward + (args.beta * transition.intrinsic_reward)
                     ) + (
                         (1 - transition.done)
                         * args.gamma
@@ -406,7 +291,7 @@ def make_run(args):
                 )  # If done, then no q value
                 initial_return = (
                     transitions.reward[-1]
-                    + (args.exploration.beta * transitions.intrinsic_reward[-1])
+                    + (args.beta * transitions.intrinsic_reward[-1])
                     + args.gamma * last_q_value
                 )
                 carry = (initial_return, last_q_value)
@@ -579,18 +464,30 @@ def make_run(args):
     return run
 
 
+ConfigOptions = Union[
+    Annotated[
+        configs.CartPoleWithIntrinsicRewardsConfig,
+        tyro.conf.subcommand(name="cartpole"),
+    ],
+    Annotated[
+        configs.MountainCarWithIntrinsicRewardsConfig,
+        tyro.conf.subcommand(name="mountaincar"),
+    ],
+]
+
 if __name__ == "__main__":
     args = tyro.cli(
-        configs.CartPoleWithIntrinsicRewardsConfig,
+        ConfigOptions,
+        default=configs.CartPoleWithIntrinsicRewardsConfig(),
         config=(tyro.conf.CascadeSubcommandArgs,),
     )
 
-    path = "data/" + args.metrics_folder_name + "/"
-    if not os.path.exists(path):
-        os.makedirs(path)
+    save_path = Path("data", args.output_folder_name)
+    save_path.mkdir(parents=True, exist_ok=True)
 
     # Save config for reproducibility
-    with open(path + "config.yaml", "w") as f:
+    config_path = save_path / "config.yaml"
+    with open(config_path, "w") as f:
         yaml.dump(dataclasses.asdict(args), f)
 
     print("Starting Run")
@@ -602,6 +499,9 @@ if __name__ == "__main__":
     counts, metrics = jax.block_until_ready(compiled_run(rngs))
     print(f"Total time: {time.time() - t0}")
 
-    np.savez(path + "metrics.npz", **metrics)
-    np.save(path + "counts.npy", counts)
+    metrics_path = save_path / "metrics.npz"
+    np.savez(metrics_path, **metrics)
+
+    counts_path = save_path / "counts.npz"
+    np.save(counts_path, counts)
     print("Finished Run")

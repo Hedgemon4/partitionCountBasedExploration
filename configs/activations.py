@@ -11,7 +11,13 @@ class BaseActivationConfig:
 class FTA(BaseActivationConfig):
     type: Literal["fta"] = "fta"
     bound: float = 1.0
-    eta: float = 0.1
+    eta: float = 0.25
+    static_centres: bool = True
+
+@dataclasses.dataclass(frozen=True)
+class FTAOriginal(FTA):
+    bound: float = 20.0
+    eta: float = 2.00
     static_centres: bool = True
 
 
@@ -28,4 +34,4 @@ class Relu(BaseActivationConfig):
     type: Literal["relu"] = "relu"
 
 
-ActivationConfig = Union[FTA, Elephant, Relu]
+ActivationConfig = Union[FTA, FTAOriginal, Elephant, Relu]
