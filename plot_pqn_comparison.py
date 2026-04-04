@@ -25,7 +25,7 @@ class Args:
     # Path to save the resulting plot
     output: Path = Path("cartpole_beta_sweep")
 
-    filename: Path = Path("beta_comparison_plot.png")
+    filename: Path = Path("extrinsic_return_comparison.png")
 
     # Title of the plot
     title: Optional[str] = None
