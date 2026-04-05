@@ -1,0 +1,12 @@
+--beta 0.0 --max-grad-norm 10.0 --network.count-layer 2 network.activation1:relu network.activation2:fta --output-folder-name cartpole_beta_second_layer_sweep/beta_0.0__max_grad_norm_10.0__fta 
+--beta 0.0 --max-grad-norm 100.0 --network.count-layer 2 network.activation1:relu network.activation2:fta --output-folder-name cartpole_beta_second_layer_sweep/beta_0.0__max_grad_norm_100.0__fta 
+--beta 0.0 --max-grad-norm 10.0 --network.count-layer 2 network.activation1:relu network.activation2:fta-original --output-folder-name cartpole_beta_second_layer_sweep/beta_0.0__max_grad_norm_10.0__fta-original 
+--beta 0.0 --max-grad-norm 100.0 --network.count-layer 2 network.activation1:relu network.activation2:fta-original --output-folder-name cartpole_beta_second_layer_sweep/beta_0.0__max_grad_norm_100.0__fta-original 
+--beta 0.1 --max-grad-norm 10.0 --network.count-layer 2 network.activation1:relu network.activation2:fta --output-folder-name cartpole_beta_second_layer_sweep/beta_0.1__max_grad_norm_10.0__fta 
+--beta 0.1 --max-grad-norm 100.0 --network.count-layer 2 network.activation1:relu network.activation2:fta --output-folder-name cartpole_beta_second_layer_sweep/beta_0.1__max_grad_norm_100.0__fta 
+--beta 0.1 --max-grad-norm 10.0 --network.count-layer 2 network.activation1:relu network.activation2:fta-original --output-folder-name cartpole_beta_second_layer_sweep/beta_0.1__max_grad_norm_10.0__fta-original 
+--beta 0.1 --max-grad-norm 100.0 --network.count-layer 2 network.activation1:relu network.activation2:fta-original --output-folder-name cartpole_beta_second_layer_sweep/beta_0.1__max_grad_norm_100.0__fta-original 
+--beta 0.01 --max-grad-norm 10.0 --network.count-layer 2 network.activation1:relu network.activation2:fta --output-folder-name cartpole_beta_second_layer_sweep/beta_0.01__max_grad_norm_10.0__fta 
+--beta 0.01 --max-grad-norm 100.0 --network.count-layer 2 network.activation1:relu network.activation2:fta --output-folder-name cartpole_beta_second_layer_sweep/beta_0.01__max_grad_norm_100.0__fta 
+--beta 0.01 --max-grad-norm 10.0 --network.count-layer 2 network.activation1:relu network.activation2:fta-original --output-folder-name cartpole_beta_second_layer_sweep/beta_0.01__max_grad_norm_10.0__fta-original 
+--beta 0.01 --max-grad-norm 100.0 --network.count-layer 2 network.activation1:relu network.activation2:fta-original --output-folder-name cartpole_beta_second_layer_sweep/beta_0.01__max_grad_norm_100.0__fta-original 
