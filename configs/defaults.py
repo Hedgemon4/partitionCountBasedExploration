@@ -3,7 +3,7 @@ import chex
 from configs.activations import ActivationConfig
 from dataclasses import field
 from configs.activations import FTA, Relu
-from configs.networks import QNetworkCounts, NetworkConfig
+from configs.networks import QNetworkCounts, NetworkConfig, QNetworkMountainCarCounts
 
 
 @chex.dataclass(frozen=True)
@@ -179,10 +179,12 @@ class MountainCarWithIntrinsicRewardsConfig(BaseConfig):
     lambda_returns: bool = True
     lam: float = 0.95
     max_grad_norm: float = 10.0
+    reward_scale: float = 1.0
     sarsa_returns: bool = True
 
     # Env Configs
     environment: str = "MountainCar-v0"
+    episode_length: int = 200
     num_environments: int = 32
     num_steps: int = 64
     total_time_steps: float = 5e5
@@ -194,4 +196,4 @@ class MountainCarWithIntrinsicRewardsConfig(BaseConfig):
     epsilon_decay: float = 0.2
 
     # Network Activation Configs
-    network: NetworkConfig = QNetworkCounts()
+    network: NetworkConfig = QNetworkMountainCarCounts()

@@ -1,0 +1,16 @@
+--beta 0.0 --max-grad-norm 10.0 --episode_length 200 network.activation2:fta --output-folder-name mountaincar_baseline/beta_0.0__max_grad_norm_10.0__episode_length_200__fta
+--beta 0.0 --max-grad-norm 10.0 --episode_length 1000 network.activation2:fta --output-folder-name mountaincar_baseline/beta_0.0__max_grad_norm_10.0__episode_length_1000__fta
+--beta 0.0 --max-grad-norm 100.0 --episode_length 200 network.activation2:fta --output-folder-name mountaincar_baseline/beta_0.0__max_grad_norm_100.0__episode_length_200__fta
+--beta 0.0 --max-grad-norm 100.0 --episode_length 1000 network.activation2:fta --output-folder-name mountaincar_baseline/beta_0.0__max_grad_norm_100.0__episode_length_1000__fta
+--beta 0.0 --max-grad-norm 10.0 --episode_length 200 network.activation2:fta-original --output-folder-name mountaincar_baseline/beta_0.0__max_grad_norm_10.0__episode_length_200__fta-original
+--beta 0.0 --max-grad-norm 10.0 --episode_length 1000 network.activation2:fta-original --output-folder-name mountaincar_baseline/beta_0.0__max_grad_norm_10.0__episode_length_1000__fta-original
+--beta 0.0 --max-grad-norm 100.0 --episode_length 200 network.activation2:fta-original --output-folder-name mountaincar_baseline/beta_0.0__max_grad_norm_100.0__episode_length_200__fta-original
+--beta 0.0 --max-grad-norm 100.0 --episode_length 1000 network.activation2:fta-original --output-folder-name mountaincar_baseline/beta_0.0__max_grad_norm_100.0__episode_length_1000__fta-original
+--beta 0.1 --max-grad-norm 10.0 --episode_length 200 network.activation2:fta --output-folder-name mountaincar_baseline/beta_0.1__max_grad_norm_10.0__episode_length_200__fta
+--beta 0.1 --max-grad-norm 10.0 --episode_length 1000 network.activation2:fta --output-folder-name mountaincar_baseline/beta_0.1__max_grad_norm_10.0__episode_length_1000__fta
+--beta 0.1 --max-grad-norm 100.0 --episode_length 200 network.activation2:fta --output-folder-name mountaincar_baseline/beta_0.1__max_grad_norm_100.0__episode_length_200__fta
+--beta 0.1 --max-grad-norm 100.0 --episode_length 1000 network.activation2:fta --output-folder-name mountaincar_baseline/beta_0.1__max_grad_norm_100.0__episode_length_1000__fta
+--beta 0.1 --max-grad-norm 10.0 --episode_length 200 network.activation2:fta-original --output-folder-name mountaincar_baseline/beta_0.1__max_grad_norm_10.0__episode_length_200__fta-original
+--beta 0.1 --max-grad-norm 10.0 --episode_length 1000 network.activation2:fta-original --output-folder-name mountaincar_baseline/beta_0.1__max_grad_norm_10.0__episode_length_1000__fta-original
+--beta 0.1 --max-grad-norm 100.0 --episode_length 200 network.activation2:fta-original --output-folder-name mountaincar_baseline/beta_0.1__max_grad_norm_100.0__episode_length_200__fta-original
+--beta 0.1 --max-grad-norm 100.0 --episode_length 1000 network.activation2:fta-original --output-folder-name mountaincar_baseline/beta_0.1__max_grad_norm_100.0__episode_length_1000__fta-original

@@ -56,8 +56,10 @@ class IntrinsicRewardData:
     returned_intrinsic_return: Array
 
 
-def make_env(environment_name):
+def make_env(environment_name, episode_length):
     env, env_params = gymnax.make(environment_name)
+    if episode_length is not None:
+        env_params = env_params.replace(max_steps_in_episode=episode_length)
     env = FlattenObservationWrapper(env)
     env = LogWrapper(env)
     vmap_reset = lambda num_envs: lambda random_key: jax.vmap(
@@ -81,7 +83,8 @@ def make_run(args):
     num_updates = int(args.total_time_steps // args.num_environments // args.num_steps)
 
     # Environment Setup
-    env, vmap_reset, vmap_step, env_params = make_env(args.environment)
+    episode_length = getattr(args, 'episode_length', None)
+    env, vmap_reset, vmap_step, env_params = make_env(args.environment, episode_length)
     ### TODO: Add support for non-gymnax environments
 
     input_size = int(env.observation_space(env_params).shape[0])
