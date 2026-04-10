@@ -14,6 +14,7 @@ class FTA(BaseActivationConfig):
     eta: float = 0.25
     static_centres: bool = True
 
+
 @dataclasses.dataclass(frozen=True)
 class FTAOriginal(FTA):
     bound: float = 20.0

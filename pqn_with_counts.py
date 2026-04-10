@@ -83,7 +83,7 @@ def make_run(args):
     num_updates = int(args.total_time_steps // args.num_environments // args.num_steps)
 
     # Environment Setup
-    episode_length = getattr(args, 'episode_length', None)
+    episode_length = getattr(args, "episode_length", None)
     env, vmap_reset, vmap_step, env_params = make_env(args.environment, episode_length)
     ### TODO: Add support for non-gymnax environments
 
@@ -154,9 +154,9 @@ def make_run(args):
 
         episode_metrics = EMAMetrics(
             ema_alpha=2 / (args.num_episodes_for_average + 1),
-            extrinsic_return_ema=0.0,
-            intrinsic_return_ema=0.0,
-            episode_length_ema=0.0,
+            extrinsic_return_ema=jnp.nan,
+            intrinsic_return_ema=jnp.nan,
+            episode_length_ema=jnp.nan,
         )
 
         step_number = 0
@@ -385,45 +385,47 @@ def make_run(args):
             episode_lengths = infos["returned_episode_lengths"]
             num_dones = is_done.sum()
 
-            effective_alpha = 1 - (1 - train_episode_metrics.ema_alpha) ** num_dones
+            def update_ema(current_ema, new_value, num_dones, alpha):
+                effective_alpha = 1 - (1 - alpha) ** num_dones
+                # If current_ema is NaN, it's the first episode; use the new_value directly
+                return jnp.where(
+                    num_dones > 0,
+                    jnp.where(
+                        jnp.isnan(current_ema),
+                        new_value,
+                        current_ema + effective_alpha * (new_value - current_ema),
+                    ),
+                    current_ema,
+                )
 
             mean_extrinsic_episode_return = jnp.sum(
                 is_done * extrinsic_episode_returns
             ) / jnp.maximum(num_dones, 1)
-            updated_extrinsic_return_ema = jnp.where(
-                num_dones > 0,
-                train_episode_metrics.extrinsic_return_ema
-                + effective_alpha
-                * (
-                    mean_extrinsic_episode_return
-                    - train_episode_metrics.extrinsic_return_ema
-                ),
+            updated_extrinsic_return_ema = update_ema(
                 train_episode_metrics.extrinsic_return_ema,
+                mean_extrinsic_episode_return,
+                num_dones,
+                train_episode_metrics.ema_alpha,
             )
 
             mean_intrinsic_episode_return = jnp.sum(
                 is_done * intrinsic_episode_returns
             ) / jnp.maximum(num_dones, 1)
-            updated_intrinsic_return_ema = jnp.where(
-                num_dones > 0,
-                train_episode_metrics.intrinsic_return_ema
-                + effective_alpha
-                * (
-                    mean_intrinsic_episode_return
-                    - train_episode_metrics.intrinsic_return_ema
-                ),
+            updated_intrinsic_return_ema = update_ema(
                 train_episode_metrics.intrinsic_return_ema,
+                mean_intrinsic_episode_return,
+                num_dones,
+                train_episode_metrics.ema_alpha,
             )
 
             mean_episode_length = jnp.sum(is_done * episode_lengths) / jnp.maximum(
                 num_dones, 1
             )
-            updated_episode_lengths_ema = jnp.where(
-                num_dones > 0,
-                train_episode_metrics.episode_length_ema
-                + effective_alpha
-                * (mean_episode_length - train_episode_metrics.episode_length_ema),
+            updated_episode_lengths_ema = update_ema(
                 train_episode_metrics.episode_length_ema,
+                mean_episode_length,
+                num_dones,
+                train_episode_metrics.ema_alpha,
             )
 
             # Update train episode metrics

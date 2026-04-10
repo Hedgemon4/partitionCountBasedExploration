@@ -11,7 +11,7 @@ class Args:
     """Refactored plotting script to find and compare PQN runs automatically."""
 
     # The root directory to search for metrics.npz files
-    root_dir: Path = Path("data/cartpole_beta_sweep")
+    root_dir: Path = Path("data/mountaincar_baseline/episode_length_1000")
 
     # The filename to look for in subdirectories
     filename_pattern: str = "metrics.npz"
@@ -23,7 +23,7 @@ class Args:
     smooth: int = 1
 
     # Path to save the resulting plot
-    output: Path = Path("cartpole_beta_sweep")
+    output: Path = Path("mountaincar_baseline/episode_length_1000")
 
     filename: Path = Path("extrinsic_return_comparison.png")
 
@@ -103,16 +103,16 @@ def main(args: Args) -> None:
     # 2. Save the main plot WITHOUT calling ax.legend()
     save_folder = Path("graphs", args.output)
     save_folder.mkdir(parents=True, exist_ok=True)
-    fig.savefig(save_folder / args.filename, dpi=300, bbox_inches='tight')
+    fig.savefig(save_folder / args.filename, dpi=300, bbox_inches="tight")
 
     # 3. Create a brand new figure for the legend ONLY
     fig_leg = plt.figure()
     # Add the legend to the new figure using the handles from the old one
-    fig_leg.legend(handles, labels, loc='center')
+    fig_leg.legend(handles, labels, loc="center")
 
     # 4. Save the legend figure
     legend_path = save_folder / "legend.png"
-    fig_leg.savefig(legend_path, dpi=300, bbox_inches='tight')
+    fig_leg.savefig(legend_path, dpi=300, bbox_inches="tight")
 
     # Cleanup
     plt.close(fig)
