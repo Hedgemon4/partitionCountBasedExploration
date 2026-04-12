@@ -22,7 +22,7 @@ while [ $COUNT -lt $MAX_RETRIES ]; do
     echo "Attempt $((COUNT + 1)) to install requirements..."
 
     # We use --no-index where possible to prioritize the local wheelhouse
-    if python -m pip install -r requirements.txt; then
+    if python -m pip install --no-index --find-links wheels -r requirements.txt; then
         echo "Installation successful!"
         SUCCESS=true
         break
