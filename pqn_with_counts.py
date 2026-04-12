@@ -339,10 +339,10 @@ def make_run(args):
                     model = eqx.combine(model_params, static)
                     mini_batch, targets = batch
                     (loss_value, loss_q_values), grads = eqx.filter_value_and_grad(
-                        model.loss, has_aux=True
+                        type(model).loss, has_aux=True
                     )(model, mini_batch.state, mini_batch.action, targets)
                     updates, optimizer_state = optim.update(
-                        grads, optimizer_state, eqx.filter(model, eqx.is_array)
+                        grads, optimizer_state, model_params
                     )
                     model = eqx.apply_updates(model, updates)
                     params, _ = eqx.partition(model, eqx.is_array)
@@ -495,10 +495,11 @@ if __name__ == "__main__":
     compiled_run = jax.jit(jax.vmap(make_run(args)))
     counts, metrics = jax.block_until_ready(compiled_run(rngs))
     print(f"Total time: {time.time() - t0}")
+    print(counts)
 
     metrics_path = save_path / "metrics.npz"
     np.savez(metrics_path, **metrics)
 
-    counts_path = save_path / "counts.npz"
+    counts_path = save_path / "counts.npy"
     np.save(counts_path, counts)
     print("Finished Run")

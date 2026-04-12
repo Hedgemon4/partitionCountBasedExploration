@@ -15,8 +15,8 @@ import yaml
 from jax import Array
 
 import configs.defaults as configs
-from exploration import epsilon_greedy
-from netwoks import QNetwork
+from exploration import epsilon_greedy_with_intrinsic_q_values
+from netwoks import QNetworkWithIntrinsicValueHead
 from wrappers import FlattenObservationWrapper, LogWrapper
 
 """
@@ -33,12 +33,16 @@ class Transition:
     reward: chex.Array
     discrete_state: chex.Array
     intrinsic_reward: chex.Array
-    selected_q_value: chex.Array
-    all_q_values: chex.Array
+    selected_extrinsic_q_value: chex.Array
+    extrinsic_q_values: chex.Array
+    selected_intrinsic_q_value: chex.Array
+    intrinsic_q_values: chex.Array
     next_state: chex.Array
     next_action: chex.Array
-    selected_next_q_value: chex.Array
-    all_next_q_values: chex.Array
+    selected_next_extrinsic_q_value: chex.Array
+    next_extrinsic_q_values: chex.Array
+    next_intrinsic_q_values: chex.Array
+    selected_next_intrinsic_q_value: chex.Array
     done: chex.Array
 
 
@@ -85,7 +89,7 @@ def make_run(args):
     def run(key):
         # Network Setup
         key, subkey = jax.random.split(key, 2)
-        initial_model = QNetwork(
+        initial_model = QNetworkWithIntrinsicValueHead(
             input_size=input_size,
             num_actions=num_actions,
             key=subkey,
@@ -121,16 +125,16 @@ def make_run(args):
         start_state, start_env_state = vmap_reset(args.num_environments)(subkey)
 
         # Get first actions
-        initial_q_values, initial_discrete_state = jax.vmap(initial_model)(start_state)
+        initial_extrinsic_q_values, initial_intrinsic_q_values, initial_discrete_state = jax.vmap(initial_model)(start_state)
         key, subkey = jax.random.split(key, 2)
-        initial_action, initial_selected_q = epsilon_greedy(
-            subkey, args.epsilon_start, initial_q_values
+        initial_action, initial_selected_extrinsic_q, initial_selected_intrinsic_q = epsilon_greedy_with_intrinsic_q_values(
+            subkey, args.epsilon_start, initial_extrinsic_q_values, initial_intrinsic_q_values, args.beta
         )
 
         # Initialize structure for computing intrinsic return metrics
         initial_intrinsic_returns = IntrinsicRewardData(
-            intrinsic_return=jnp.zeros_like(initial_selected_q),
-            returned_intrinsic_return=jnp.zeros_like(initial_selected_q),
+            intrinsic_return=jnp.zeros_like(initial_selected_intrinsic_q),
+            returned_intrinsic_return=jnp.zeros_like(initial_selected_intrinsic_q),
         )
 
         initial_env_carry = (
@@ -139,8 +143,10 @@ def make_run(args):
             start_state,
             initial_action,
             initial_discrete_state,
-            initial_selected_q,
-            initial_q_values,
+            initial_selected_extrinsic_q,
+            initial_extrinsic_q_values,
+            initial_selected_intrinsic_q,
+            initial_intrinsic_q_values,
             initial_intrinsic_returns,
         )
 
@@ -178,8 +184,10 @@ def make_run(args):
                     state,
                     action,
                     discrete_state,
-                    selected_q_value,
-                    all_q_values,
+                    selected_extrinsic_q_value,
+                    all_extrinsic_q_values,
+                    selected_intrinsic_q_value,
+                    all_intrinsic_q_values,
                     intrinsic_returns,
                 ) = carry
 
@@ -189,9 +197,10 @@ def make_run(args):
                     args.num_environments
                 )(subkey, step_env_state, action)
                 # Get next actions
-                next_q_values, next_discrete_state = jax.vmap(model)(next_state)
+                next_extrinsic_q_values, next_intrinsic_q_values, next_discrete_state = jax.vmap(model)(next_state)
                 key, subkey = jax.random.split(key, 2)
-                next_action, next_q = epsilon_greedy(subkey, epsilon, next_q_values)
+
+                next_action, next_extrinsic_q, next_intrinsic_q = epsilon_greedy_with_intrinsic_q_values(subkey, epsilon, next_extrinsic_q_values, next_intrinsic_q_values, args.beta)
                 scaled_reward = reward * args.reward_scale
 
                 # Compute intrinsic reward
@@ -221,12 +230,16 @@ def make_run(args):
                     reward=scaled_reward,
                     discrete_state=discrete_state,
                     intrinsic_reward=intrinsic_reward,
-                    selected_q_value=selected_q_value,
-                    all_q_values=all_q_values,
+                    selected_extrinsic_q_value=selected_extrinsic_q_value,
+                    selected_intrinsic_q_value=selected_intrinsic_q_value,
+                    extrinsic_q_values=all_extrinsic_q_values,
+                    intrinsic_q_values=all_intrinsic_q_values,
                     next_state=next_state,
                     next_action=next_action,
-                    selected_next_q_value=next_q,
-                    all_next_q_values=next_q_values,
+                    selected_next_extrinsic_q_value=next_extrinsic_q,
+                    selected_next_intrinsic_q_value=next_intrinsic_q,
+                    next_extrinsic_q_values=next_extrinsic_q_values,
+                    next_intrinsic_q_values=next_intrinsic_q_values,
                     done=done,
                 )
 
@@ -236,8 +249,10 @@ def make_run(args):
                     next_state,
                     next_action,
                     next_discrete_state,
-                    next_q,
-                    next_q_values,
+                    next_extrinsic_q,
+                    next_extrinsic_q_values,
+                    next_intrinsic_q,
+                    next_intrinsic_q_values,
                     updated_intrinsic_returns,
                 ), (
                     transition,
@@ -257,59 +272,58 @@ def make_run(args):
             model = model.update_counts(flat_states, flat_actions)
 
             # Compute Targets
-            if args.lambda_returns:
-                # TODO: These targets still might be wrong
-                def lambda_targets(carry, transition):
-                    target, next_q = carry
-                    updated_target = (
-                        transition.reward + (args.beta * transition.intrinsic_reward)
-                    ) + (
-                        (1 - transition.done)
-                        * args.gamma
-                        * (args.lam * target + (1 - args.lam) * next_q)
-                    )
-                    next_q = (
-                        transition.selected_q_value
-                        if args.sarsa_returns
-                        else jnp.max(transition.all_q_values, axis=-1)
-                    )
-                    return (updated_target, next_q), updated_target
-
-                # Want to compute the targets. Each target will have the final q value in it, so we can start with that
-                last_q_value = (
-                    transitions.selected_next_q_value[-1, :]
+            # TODO: These targets still might be wrong
+            def lambda_targets(lambda_carry, transition):
+                target, next_q = lambda_carry
+                updated_target = transition.reward + (
+                    1 - transition.done
+                ) * args.gamma * (args.lam * target + (1 - args.lam) * next_q)
+                next_q = (
+                    transition.selected_extrinsic_q_value
                     if args.sarsa_returns
-                    else jnp.max(transitions.all_next_q_values[-1, :], axis=-1)
+                    else jnp.max(transition.intrinsic_q_values, axis=-1)
                 )
-                last_q_value = last_q_value * (
-                    1 - transitions.done[-1]
-                )  # If done, then no q value
-                initial_return = (
-                    transitions.reward[-1]
-                    + (args.beta * transitions.intrinsic_reward[-1])
-                    + args.gamma * last_q_value
-                )
-                carry = (initial_return, last_q_value)
-                final_target_carry, targets = jax.lax.scan(
-                    lambda_targets,
-                    carry,
-                    jax.tree_util.tree_map(lambda x: x[:-1], transitions),
-                    reverse=True,
-                )
-                update_targets = jnp.concatenate((targets, initial_return[np.newaxis]))
-            else:
+                return (updated_target, next_q), updated_target
 
-                def targets(transition, gamma):
-                    return (
-                        transition.reward
-                        + (1 - transition.done)
-                        * gamma
-                        * transition.selected_next_q_value
-                    )
+            ### Compute extrinsic targets
+            # Want to compute the targets. Each target will have the final q value in it, so we can start with that
+            last_extrinsic_q_value = (
+                transitions.selected_next_extrinsic_q_value[-1, :]
+                if args.sarsa_returns
+                else jnp.max(transitions.next_extrinsic_q_values[-1, :], axis=-1)
+            )
+            last_extrinsic_q_value = last_extrinsic_q_value * (
+                1 - transitions.done[-1]
+            )  # If done, then no q value
+            initial_extrinsic_return = (
+                transitions.reward[-1]
+                + args.gamma * last_extrinsic_q_value
+            )
 
-                update_targets = jax.vmap(targets, in_axes=(0, None))(
-                    transitions, args.gamma
-                )
+            last_intrinsic_q_value = (
+                transitions.selected_next_intrinsic_q_value[-1, :]
+                if args.sarsa_returns
+                else jnp.max(transitions.next_intrinsic_q_values[-1, :], axis=-1)
+            )
+            last_intrinsic_q_value = last_intrinsic_q_value * (
+                1 - transitions.done[-1]
+            )
+            initial_intrinsic_return = (
+                transitions.intrinsic_reward[-1]
+                + args.gamma * last_intrinsic_q_value
+            )
+
+            extrinsic_target_carry = (initial_extrinsic_return, last_extrinsic_q_value, initial_intrinsic_return, last_intrinsic_q_value)
+            final_extrinsic_target_carry, extrinsic_targets = jax.lax.scan(
+                lambda_targets,
+                extrinsic_target_carry,
+                jax.tree_util.tree_map(lambda x: x[:-1], transitions),
+                reverse=True,
+            )
+            updated_extrinsic_targets = jnp.concatenate((extrinsic_targets, initial_extrinsic_return[np.newaxis]))
+
+            ### Compute intrinsic targets
+            ### TODO: Fix lambda returns function to vmap over both targets at the same time and also fix the values it is using
 
             # Split network for eqx
             network_params, _ = eqx.partition(model, eqx.is_array)
@@ -330,7 +344,7 @@ def make_run(args):
                     lambda x: process_data(x, epoch_rng), transitions
                 )
                 targets = jax.tree_util.tree_map(
-                    lambda x: process_data(x, epoch_rng), update_targets
+                    lambda x: process_data(x, epoch_rng), updated_extrinsic_targets
                 )
 
                 # Compute the loss and update the model
