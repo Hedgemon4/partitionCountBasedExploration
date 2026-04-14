@@ -495,7 +495,6 @@ if __name__ == "__main__":
     compiled_run = jax.jit(jax.vmap(make_run(args)))
     counts, metrics = jax.block_until_ready(compiled_run(rngs))
     print(f"Total time: {time.time() - t0}")
-    print(counts)
 
     metrics_path = save_path / "metrics.npz"
     np.savez(metrics_path, **metrics)
