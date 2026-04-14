@@ -168,7 +168,7 @@ class CartPoleWithIntrinsicRewardsConfig(BaseConfig):
 @chex.dataclass(frozen=True)
 class MountainCarWithIntrinsicRewardsConfig(BaseConfig):
     # Experiment Configs
-    output_folder_name: str = "pqn_mountaincar_with_intrinsic_rewards"
+    output_folder_name: str = "pqn_same_epsilon_testing"
 
     # Algorithm Configs
     initial_learning_rate: float = 0.004
@@ -178,7 +178,7 @@ class MountainCarWithIntrinsicRewardsConfig(BaseConfig):
     gamma: float = 0.99
     lambda_returns: bool = True
     lam: float = 0.95
-    max_grad_norm: float = 10.0
+    max_grad_norm: float = 100.0
     reward_scale: float = 1.0
     sarsa_returns: bool = True
 
@@ -192,7 +192,7 @@ class MountainCarWithIntrinsicRewardsConfig(BaseConfig):
     # Exploration Configs
     beta: float = 0.1
     epsilon_start: float = 1.0
-    epsilon_end: float = 0.05
+    epsilon_end: float = 0.01
     epsilon_decay: float = 0.2
 
     # Network Activation Configs

@@ -25,12 +25,12 @@ class QNetworkCounts(BaseNetworkConfig):
 class QNetworkMountainCarCounts(BaseNetworkConfig):
     type: Literal["q_network_counts"] = "q_network_counts"
     hidden_size: int = 64
-    learnable_norm_params: bool = False
-    count_layer: int = 2
+    learnable_norm_params: bool = True
+    count_layer: int = 1
 
     # Network Activation Configs
-    activation1: ActivationConfig = Relu()
-    activation2: ActivationConfig = FTA()
+    activation1: ActivationConfig = FTA()
+    activation2: ActivationConfig = Relu()
 
 
 NetworkConfig = Union[QNetworkCounts, QNetworkMountainCarCounts, BaseNetworkConfig]
