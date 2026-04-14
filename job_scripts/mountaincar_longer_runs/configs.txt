@@ -1,36 +1,144 @@
---beta 1.0 --total_time_steps 5e5 --epsilon_decay 0.2 --output-folder-name mountaincar_longer_runs/run_0
---beta 1.0 --total_time_steps 5e5 --epsilon_decay 0.1 --output-folder-name mountaincar_longer_runs/run_1
---beta 1.0 --total_time_steps 5e5 --epsilon_decay 0.05 --output-folder-name mountaincar_longer_runs/run_2
---beta 1.0 --total_time_steps 1e6 --epsilon_decay 0.2 --output-folder-name mountaincar_longer_runs/run_3
---beta 1.0 --total_time_steps 1e6 --epsilon_decay 0.1 --output-folder-name mountaincar_longer_runs/run_4
---beta 1.0 --total_time_steps 1e6 --epsilon_decay 0.05 --output-folder-name mountaincar_longer_runs/run_5
---beta 1.0 --total_time_steps 2e6 --epsilon_decay 0.2 --output-folder-name mountaincar_longer_runs/run_6
---beta 1.0 --total_time_steps 2e6 --epsilon_decay 0.1 --output-folder-name mountaincar_longer_runs/run_7
---beta 1.0 --total_time_steps 2e6 --epsilon_decay 0.05 --output-folder-name mountaincar_longer_runs/run_8
---beta 0.5 --total_time_steps 5e5 --epsilon_decay 0.2 --output-folder-name mountaincar_longer_runs/run_9
---beta 0.5 --total_time_steps 5e5 --epsilon_decay 0.1 --output-folder-name mountaincar_longer_runs/run_10
---beta 0.5 --total_time_steps 5e5 --epsilon_decay 0.05 --output-folder-name mountaincar_longer_runs/run_11
---beta 0.5 --total_time_steps 1e6 --epsilon_decay 0.2 --output-folder-name mountaincar_longer_runs/run_12
---beta 0.5 --total_time_steps 1e6 --epsilon_decay 0.1 --output-folder-name mountaincar_longer_runs/run_13
---beta 0.5 --total_time_steps 1e6 --epsilon_decay 0.05 --output-folder-name mountaincar_longer_runs/run_14
---beta 0.5 --total_time_steps 2e6 --epsilon_decay 0.2 --output-folder-name mountaincar_longer_runs/run_15
---beta 0.5 --total_time_steps 2e6 --epsilon_decay 0.1 --output-folder-name mountaincar_longer_runs/run_16
---beta 0.5 --total_time_steps 2e6 --epsilon_decay 0.05 --output-folder-name mountaincar_longer_runs/run_17
---beta 0.1 --total_time_steps 5e5 --epsilon_decay 0.2 --output-folder-name mountaincar_longer_runs/run_18
---beta 0.1 --total_time_steps 5e5 --epsilon_decay 0.1 --output-folder-name mountaincar_longer_runs/run_19
---beta 0.1 --total_time_steps 5e5 --epsilon_decay 0.05 --output-folder-name mountaincar_longer_runs/run_20
---beta 0.1 --total_time_steps 1e6 --epsilon_decay 0.2 --output-folder-name mountaincar_longer_runs/run_21
---beta 0.1 --total_time_steps 1e6 --epsilon_decay 0.1 --output-folder-name mountaincar_longer_runs/run_22
---beta 0.1 --total_time_steps 1e6 --epsilon_decay 0.05 --output-folder-name mountaincar_longer_runs/run_23
---beta 0.1 --total_time_steps 2e6 --epsilon_decay 0.2 --output-folder-name mountaincar_longer_runs/run_24
---beta 0.1 --total_time_steps 2e6 --epsilon_decay 0.1 --output-folder-name mountaincar_longer_runs/run_25
---beta 0.1 --total_time_steps 2e6 --epsilon_decay 0.05 --output-folder-name mountaincar_longer_runs/run_26
---beta 0.0 --total_time_steps 5e5 --epsilon_decay 0.2 --output-folder-name mountaincar_longer_runs/run_27
---beta 0.0 --total_time_steps 5e5 --epsilon_decay 0.1 --output-folder-name mountaincar_longer_runs/run_28
---beta 0.0 --total_time_steps 5e5 --epsilon_decay 0.05 --output-folder-name mountaincar_longer_runs/run_29
---beta 0.0 --total_time_steps 1e6 --epsilon_decay 0.2 --output-folder-name mountaincar_longer_runs/run_30
---beta 0.0 --total_time_steps 1e6 --epsilon_decay 0.1 --output-folder-name mountaincar_longer_runs/run_31
---beta 0.0 --total_time_steps 1e6 --epsilon_decay 0.05 --output-folder-name mountaincar_longer_runs/run_32
---beta 0.0 --total_time_steps 2e6 --epsilon_decay 0.2 --output-folder-name mountaincar_longer_runs/run_33
---beta 0.0 --total_time_steps 2e6 --epsilon_decay 0.1 --output-folder-name mountaincar_longer_runs/run_34
---beta 0.0 --total_time_steps 2e6 --epsilon_decay 0.05 --output-folder-name mountaincar_longer_runs/run_35
+--beta 1.0 --total_time_steps 5e5 --epsilon_decay 0.2 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_0
+--beta 1.0 --total_time_steps 5e5 --epsilon_decay 0.2 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_1
+--beta 1.0 --total_time_steps 5e5 --epsilon_decay 0.2 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_2
+--beta 1.0 --total_time_steps 5e5 --epsilon_decay 0.2 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_3
+--beta 1.0 --total_time_steps 5e5 --epsilon_decay 0.1 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_4
+--beta 1.0 --total_time_steps 5e5 --epsilon_decay 0.1 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_5
+--beta 1.0 --total_time_steps 5e5 --epsilon_decay 0.1 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_6
+--beta 1.0 --total_time_steps 5e5 --epsilon_decay 0.1 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_7
+--beta 1.0 --total_time_steps 5e5 --epsilon_decay 0.05 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_8
+--beta 1.0 --total_time_steps 5e5 --epsilon_decay 0.05 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_9
+--beta 1.0 --total_time_steps 5e5 --epsilon_decay 0.05 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_10
+--beta 1.0 --total_time_steps 5e5 --epsilon_decay 0.05 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_11
+--beta 1.0 --total_time_steps 1e6 --epsilon_decay 0.2 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_12
+--beta 1.0 --total_time_steps 1e6 --epsilon_decay 0.2 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_13
+--beta 1.0 --total_time_steps 1e6 --epsilon_decay 0.2 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_14
+--beta 1.0 --total_time_steps 1e6 --epsilon_decay 0.2 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_15
+--beta 1.0 --total_time_steps 1e6 --epsilon_decay 0.1 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_16
+--beta 1.0 --total_time_steps 1e6 --epsilon_decay 0.1 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_17
+--beta 1.0 --total_time_steps 1e6 --epsilon_decay 0.1 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_18
+--beta 1.0 --total_time_steps 1e6 --epsilon_decay 0.1 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_19
+--beta 1.0 --total_time_steps 1e6 --epsilon_decay 0.05 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_20
+--beta 1.0 --total_time_steps 1e6 --epsilon_decay 0.05 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_21
+--beta 1.0 --total_time_steps 1e6 --epsilon_decay 0.05 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_22
+--beta 1.0 --total_time_steps 1e6 --epsilon_decay 0.05 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_23
+--beta 1.0 --total_time_steps 2e6 --epsilon_decay 0.2 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_24
+--beta 1.0 --total_time_steps 2e6 --epsilon_decay 0.2 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_25
+--beta 1.0 --total_time_steps 2e6 --epsilon_decay 0.2 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_26
+--beta 1.0 --total_time_steps 2e6 --epsilon_decay 0.2 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_27
+--beta 1.0 --total_time_steps 2e6 --epsilon_decay 0.1 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_28
+--beta 1.0 --total_time_steps 2e6 --epsilon_decay 0.1 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_29
+--beta 1.0 --total_time_steps 2e6 --epsilon_decay 0.1 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_30
+--beta 1.0 --total_time_steps 2e6 --epsilon_decay 0.1 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_31
+--beta 1.0 --total_time_steps 2e6 --epsilon_decay 0.05 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_32
+--beta 1.0 --total_time_steps 2e6 --epsilon_decay 0.05 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_33
+--beta 1.0 --total_time_steps 2e6 --epsilon_decay 0.05 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_34
+--beta 1.0 --total_time_steps 2e6 --epsilon_decay 0.05 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_35
+--beta 0.5 --total_time_steps 5e5 --epsilon_decay 0.2 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_36
+--beta 0.5 --total_time_steps 5e5 --epsilon_decay 0.2 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_37
+--beta 0.5 --total_time_steps 5e5 --epsilon_decay 0.2 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_38
+--beta 0.5 --total_time_steps 5e5 --epsilon_decay 0.2 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_39
+--beta 0.5 --total_time_steps 5e5 --epsilon_decay 0.1 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_40
+--beta 0.5 --total_time_steps 5e5 --epsilon_decay 0.1 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_41
+--beta 0.5 --total_time_steps 5e5 --epsilon_decay 0.1 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_42
+--beta 0.5 --total_time_steps 5e5 --epsilon_decay 0.1 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_43
+--beta 0.5 --total_time_steps 5e5 --epsilon_decay 0.05 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_44
+--beta 0.5 --total_time_steps 5e5 --epsilon_decay 0.05 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_45
+--beta 0.5 --total_time_steps 5e5 --epsilon_decay 0.05 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_46
+--beta 0.5 --total_time_steps 5e5 --epsilon_decay 0.05 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_47
+--beta 0.5 --total_time_steps 1e6 --epsilon_decay 0.2 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_48
+--beta 0.5 --total_time_steps 1e6 --epsilon_decay 0.2 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_49
+--beta 0.5 --total_time_steps 1e6 --epsilon_decay 0.2 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_50
+--beta 0.5 --total_time_steps 1e6 --epsilon_decay 0.2 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_51
+--beta 0.5 --total_time_steps 1e6 --epsilon_decay 0.1 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_52
+--beta 0.5 --total_time_steps 1e6 --epsilon_decay 0.1 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_53
+--beta 0.5 --total_time_steps 1e6 --epsilon_decay 0.1 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_54
+--beta 0.5 --total_time_steps 1e6 --epsilon_decay 0.1 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_55
+--beta 0.5 --total_time_steps 1e6 --epsilon_decay 0.05 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_56
+--beta 0.5 --total_time_steps 1e6 --epsilon_decay 0.05 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_57
+--beta 0.5 --total_time_steps 1e6 --epsilon_decay 0.05 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_58
+--beta 0.5 --total_time_steps 1e6 --epsilon_decay 0.05 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_59
+--beta 0.5 --total_time_steps 2e6 --epsilon_decay 0.2 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_60
+--beta 0.5 --total_time_steps 2e6 --epsilon_decay 0.2 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_61
+--beta 0.5 --total_time_steps 2e6 --epsilon_decay 0.2 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_62
+--beta 0.5 --total_time_steps 2e6 --epsilon_decay 0.2 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_63
+--beta 0.5 --total_time_steps 2e6 --epsilon_decay 0.1 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_64
+--beta 0.5 --total_time_steps 2e6 --epsilon_decay 0.1 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_65
+--beta 0.5 --total_time_steps 2e6 --epsilon_decay 0.1 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_66
+--beta 0.5 --total_time_steps 2e6 --epsilon_decay 0.1 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_67
+--beta 0.5 --total_time_steps 2e6 --epsilon_decay 0.05 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_68
+--beta 0.5 --total_time_steps 2e6 --epsilon_decay 0.05 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_69
+--beta 0.5 --total_time_steps 2e6 --epsilon_decay 0.05 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_70
+--beta 0.5 --total_time_steps 2e6 --epsilon_decay 0.05 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_71
+--beta 0.1 --total_time_steps 5e5 --epsilon_decay 0.2 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_72
+--beta 0.1 --total_time_steps 5e5 --epsilon_decay 0.2 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_73
+--beta 0.1 --total_time_steps 5e5 --epsilon_decay 0.2 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_74
+--beta 0.1 --total_time_steps 5e5 --epsilon_decay 0.2 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_75
+--beta 0.1 --total_time_steps 5e5 --epsilon_decay 0.1 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_76
+--beta 0.1 --total_time_steps 5e5 --epsilon_decay 0.1 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_77
+--beta 0.1 --total_time_steps 5e5 --epsilon_decay 0.1 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_78
+--beta 0.1 --total_time_steps 5e5 --epsilon_decay 0.1 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_79
+--beta 0.1 --total_time_steps 5e5 --epsilon_decay 0.05 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_80
+--beta 0.1 --total_time_steps 5e5 --epsilon_decay 0.05 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_81
+--beta 0.1 --total_time_steps 5e5 --epsilon_decay 0.05 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_82
+--beta 0.1 --total_time_steps 5e5 --epsilon_decay 0.05 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_83
+--beta 0.1 --total_time_steps 1e6 --epsilon_decay 0.2 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_84
+--beta 0.1 --total_time_steps 1e6 --epsilon_decay 0.2 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_85
+--beta 0.1 --total_time_steps 1e6 --epsilon_decay 0.2 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_86
+--beta 0.1 --total_time_steps 1e6 --epsilon_decay 0.2 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_87
+--beta 0.1 --total_time_steps 1e6 --epsilon_decay 0.1 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_88
+--beta 0.1 --total_time_steps 1e6 --epsilon_decay 0.1 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_89
+--beta 0.1 --total_time_steps 1e6 --epsilon_decay 0.1 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_90
+--beta 0.1 --total_time_steps 1e6 --epsilon_decay 0.1 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_91
+--beta 0.1 --total_time_steps 1e6 --epsilon_decay 0.05 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_92
+--beta 0.1 --total_time_steps 1e6 --epsilon_decay 0.05 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_93
+--beta 0.1 --total_time_steps 1e6 --epsilon_decay 0.05 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_94
+--beta 0.1 --total_time_steps 1e6 --epsilon_decay 0.05 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_95
+--beta 0.1 --total_time_steps 2e6 --epsilon_decay 0.2 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_96
+--beta 0.1 --total_time_steps 2e6 --epsilon_decay 0.2 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_97
+--beta 0.1 --total_time_steps 2e6 --epsilon_decay 0.2 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_98
+--beta 0.1 --total_time_steps 2e6 --epsilon_decay 0.2 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_99
+--beta 0.1 --total_time_steps 2e6 --epsilon_decay 0.1 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_100
+--beta 0.1 --total_time_steps 2e6 --epsilon_decay 0.1 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_101
+--beta 0.1 --total_time_steps 2e6 --epsilon_decay 0.1 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_102
+--beta 0.1 --total_time_steps 2e6 --epsilon_decay 0.1 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_103
+--beta 0.1 --total_time_steps 2e6 --epsilon_decay 0.05 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_104
+--beta 0.1 --total_time_steps 2e6 --epsilon_decay 0.05 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_105
+--beta 0.1 --total_time_steps 2e6 --epsilon_decay 0.05 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_106
+--beta 0.1 --total_time_steps 2e6 --epsilon_decay 0.05 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_107
+--beta 0.0 --total_time_steps 5e5 --epsilon_decay 0.2 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_108
+--beta 0.0 --total_time_steps 5e5 --epsilon_decay 0.2 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_109
+--beta 0.0 --total_time_steps 5e5 --epsilon_decay 0.2 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_110
+--beta 0.0 --total_time_steps 5e5 --epsilon_decay 0.2 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_111
+--beta 0.0 --total_time_steps 5e5 --epsilon_decay 0.1 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_112
+--beta 0.0 --total_time_steps 5e5 --epsilon_decay 0.1 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_113
+--beta 0.0 --total_time_steps 5e5 --epsilon_decay 0.1 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_114
+--beta 0.0 --total_time_steps 5e5 --epsilon_decay 0.1 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_115
+--beta 0.0 --total_time_steps 5e5 --epsilon_decay 0.05 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_116
+--beta 0.0 --total_time_steps 5e5 --epsilon_decay 0.05 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_117
+--beta 0.0 --total_time_steps 5e5 --epsilon_decay 0.05 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_118
+--beta 0.0 --total_time_steps 5e5 --epsilon_decay 0.05 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_119
+--beta 0.0 --total_time_steps 1e6 --epsilon_decay 0.2 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_120
+--beta 0.0 --total_time_steps 1e6 --epsilon_decay 0.2 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_121
+--beta 0.0 --total_time_steps 1e6 --epsilon_decay 0.2 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_122
+--beta 0.0 --total_time_steps 1e6 --epsilon_decay 0.2 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_123
+--beta 0.0 --total_time_steps 1e6 --epsilon_decay 0.1 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_124
+--beta 0.0 --total_time_steps 1e6 --epsilon_decay 0.1 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_125
+--beta 0.0 --total_time_steps 1e6 --epsilon_decay 0.1 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_126
+--beta 0.0 --total_time_steps 1e6 --epsilon_decay 0.1 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_127
+--beta 0.0 --total_time_steps 1e6 --epsilon_decay 0.05 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_128
+--beta 0.0 --total_time_steps 1e6 --epsilon_decay 0.05 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_129
+--beta 0.0 --total_time_steps 1e6 --epsilon_decay 0.05 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_130
+--beta 0.0 --total_time_steps 1e6 --epsilon_decay 0.05 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_131
+--beta 0.0 --total_time_steps 2e6 --epsilon_decay 0.2 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_132
+--beta 0.0 --total_time_steps 2e6 --epsilon_decay 0.2 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_133
+--beta 0.0 --total_time_steps 2e6 --epsilon_decay 0.2 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_134
+--beta 0.0 --total_time_steps 2e6 --epsilon_decay 0.2 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_135
+--beta 0.0 --total_time_steps 2e6 --epsilon_decay 0.1 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_136
+--beta 0.0 --total_time_steps 2e6 --epsilon_decay 0.1 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_137
+--beta 0.0 --total_time_steps 2e6 --epsilon_decay 0.1 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_138
+--beta 0.0 --total_time_steps 2e6 --epsilon_decay 0.1 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_139
+--beta 0.0 --total_time_steps 2e6 --epsilon_decay 0.05 --initial_learning_rate 0.04 --final_learning_rate 0.04  --output-folder-name mountaincar_longer_runs/run_140
+--beta 0.0 --total_time_steps 2e6 --epsilon_decay 0.05 --initial_learning_rate 0.01 --final_learning_rate 0.01  --output-folder-name mountaincar_longer_runs/run_141
+--beta 0.0 --total_time_steps 2e6 --epsilon_decay 0.05 --initial_learning_rate 0.004 --final_learning_rate 0.004  --output-folder-name mountaincar_longer_runs/run_142
+--beta 0.0 --total_time_steps 2e6 --epsilon_decay 0.05 --initial_learning_rate 0.001 --final_learning_rate 0.001  --output-folder-name mountaincar_longer_runs/run_143
