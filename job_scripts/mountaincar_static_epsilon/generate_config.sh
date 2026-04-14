@@ -10,12 +10,10 @@ output_file="configs.txt"
 
 >"$output_file"
 for beta in "${betas[@]}"; do
-    for max_step in "${time_steps[@]}"; do
-        for epsilon in "${epsilons[@]}"; do
-            for rate in "${learning_rate[@]}"; do
-                echo "--beta $beta --total_time_steps $max_step --epsilon_start $epsilon --epsilon_decay 0 --initial_learning_rate $rate --final_learning_rate $rate  --output-folder-name mountaincar_static_epsilon/run_$counter" >>"$output_file"
-                ((counter++))
-            done
+    for epsilon in "${epsilons[@]}"; do
+        for rate in "${learning_rate[@]}"; do
+            echo "--beta $beta --epsilon_start $epsilon --epsilon_decay 0 --initial_learning_rate $rate --final_learning_rate $rate  --output-folder-name mountaincar_static_epsilon/run_$counter" >>"$output_file"
+            ((counter++))
         done
     done
 done
