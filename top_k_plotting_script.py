@@ -11,23 +11,24 @@ import scipy.stats as stats
 @dataclass
 class Args:
     """Analyze and plot specific runs from a large hyperparameter sweep."""
-    root_dir: Path = Path("data/mountaincar_count_first_layer_combined")
+    root_dir: Path = Path("data/mountaincar_longer_runs")
     metric: str = "extrinsic_return_ema"
     intrinsic_metric: str = "intrinsic_return_ema"
-    top_k: int = 5
+    top_k: int = 10
     smooth: int = 1
-    output_dir: Path = Path("graphs/meeting_plots/best_beta_1/")
+    output_dir: Path = Path("graphs/mountaincar_longer_runs/timesteps_2e6/top_10/")
 
     # --- LEGEND PARAMETERS ---
     legend_vars: Optional[List[str]] = None
 
     # --- FILTER PARAMETERS ---
-    beta: Optional[float] = 1.0
+    beta: Optional[float] = None
     activation: Optional[str] = "fta"
     max_grad_norm: Optional[float] = None
     epsilon_end: Optional[float] = None
     hidden_size: Optional[int] = None
     learnable_norm: Optional[bool] = None
+    total_time_steps: Optional[float] = None
 
 
 def moving_average(x: np.ndarray, w: int):
@@ -53,6 +54,7 @@ def matches_filters(folder_path: Path, args: Args) -> bool:
     if args.hidden_size is not None and network_config.get("hidden_size") != args.hidden_size: return False
     if args.learnable_norm is not None and network_config.get(
         "learnable_norm_params") != args.learnable_norm: return False
+    if args.total_time_steps is not None and config.get("total_time_steps") != args.total_time_steps: return False
     if args.activation is not None and network_config.get("activation1", {}).get(
         "type") != args.activation: return False
     return True

@@ -12,14 +12,14 @@ import scipy.stats as stats
 class Args:
     """Find and plot the best performing run for each unique beta value."""
     # The root directory containing all the run subfolders
-    root_dir: Path = Path("data/mountaincar_count_first_layer_combined")
+    root_dir: Path = Path("data/mountaincar_static_epsilon")
     # Metrics to analyze
     metric: str = "extrinsic_return_ema"
     intrinsic_metric: str = "intrinsic_return_ema"
     # Window size for smoothing the line plot
     smooth: int = 1
     # Output directory for graphs
-    output_dir: Path = Path("graphs/meeting_plots/best_beta/overall")
+    output_dir: Path = Path("graphs/mountaincar_static_epsilon/best_beta/")
 
     # --- LEGEND PARAMETERS ---
     legend_vars: Optional[List[str]] = None
@@ -31,6 +31,7 @@ class Args:
     epsilon_end: Optional[float] = None
     hidden_size: Optional[int] = None
     learnable_norm: Optional[bool] = None
+    total_time_steps: Optional[float] = None
 
 
 def moving_average(x: np.ndarray, w: int):
@@ -83,6 +84,7 @@ def matches_filters(folder_path: Path, args: Args) -> bool:
 
     network_config = config.get("network", {})
     if args.hidden_size is not None and network_config.get("hidden_size") != args.hidden_size: return False
+    if args.total_time_steps is not None and config.get("total_time_steps") != args.total_time_steps: return False
     if args.learnable_norm is not None and network_config.get(
         "learnable_norm_params") != args.learnable_norm: return False
     if args.activation is not None and network_config.get("activation1", {}).get(
