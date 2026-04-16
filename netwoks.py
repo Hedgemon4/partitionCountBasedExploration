@@ -15,6 +15,10 @@ class QNetwork(eqx.Module):
         hidden_size = network_config.hidden_size
         learnable_norm_params = network_config.learnable_norm_params
 
+        # Instantiate both activation layers
+        activation_layer_1 = make_activation(network_config.activation1)
+        activation_layer_2 = make_activation(network_config.activation2)
+
         self.layers = [
             eqx.nn.Linear(in_features=input_size, out_features=hidden_size, key=key1),
             eqx.nn.LayerNorm(
@@ -22,14 +26,14 @@ class QNetwork(eqx.Module):
                 use_weight=learnable_norm_params,
                 use_bias=learnable_norm_params,
             ),
-            jax.nn.relu,
+            activation_layer_1,
             eqx.nn.Linear(in_features=hidden_size, out_features=hidden_size, key=key2),
             eqx.nn.LayerNorm(
                 hidden_size,
                 use_weight=learnable_norm_params,
                 use_bias=learnable_norm_params,
             ),
-            jax.nn.relu,
+            activation_layer_2,
             eqx.nn.Linear(in_features=hidden_size, out_features=num_actions, key=key3),
         ]
 

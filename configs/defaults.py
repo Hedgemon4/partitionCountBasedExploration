@@ -47,7 +47,7 @@ class PQNOriginalCartpoleConfig:
 
 
 @chex.dataclass(frozen=True)
-class PQNCartpoleConfig:
+class PQNCartpoleConfig(BaseConfig):
     # Experiment Configs
     output_folder_name: str = "pqn_cartpole"
 
@@ -65,7 +65,6 @@ class PQNCartpoleConfig:
 
     # Env Configs
     environment: str = "CartPole-v1"
-    episode_length: int = 200
     num_environments: int = 32
     num_steps: int = 64
     total_time_steps: float = 5e5
@@ -80,7 +79,7 @@ class PQNCartpoleConfig:
 
 
 @chex.dataclass(frozen=True)
-class PQNMountainCarConfig:
+class PQNMountainCarConfig(BaseConfig):
     # Experiment Configs
     output_folder_name: str = "pqn_mountaincar"
 

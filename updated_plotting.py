@@ -13,7 +13,7 @@ class Args:
     """Plotting script to group and compare PQN runs based on config.yaml."""
 
     # The root directory to search for metrics.npz files
-    root_dir: Path = Path("data/mountaincar_count_second_layer")
+    root_dir: Path = Path("data/pqn_mountaincar")
 
     # The key in the .npz file to visualize
     metric: str = "extrinsic_return_ema"
@@ -22,11 +22,11 @@ class Args:
     smooth: int = 1
 
     # Directory to save the resulting plots
-    output_dir: Path = Path("graphs/mountaincar_count_second_layer")
+    output_dir: Path = Path("graphs/pqn_mountaincar/")
 
     # Config keys to group by. A separate plot will be generated for each combination.
     # Note: Use dot notation for nested yaml keys, e.g., 'network.hidden_size'
-    group_by: Tuple[str, ...] = ("beta", "max_grad_norm", "epsilon_end")
+    group_by: Tuple[str, ...] = ("max_grad_norm", "epsilon_end")
 
     # These keys are ignored when trying to figure out what changed for the legend labels,
     # because they usually differ for every single run or are irrelevant.

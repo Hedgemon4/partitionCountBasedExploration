@@ -341,6 +341,9 @@ def make_run(args):
                 episode_length_ema=updated_episode_lengths_ema,
             )
 
+            metrics["extrinsic_return_ema"] = updated_extrinsic_return_ema
+            metrics["length_ema"] = updated_episode_lengths_ema
+
             return (
                 epoch_key,
                 step_number,
@@ -363,9 +366,8 @@ def make_run(args):
         final_carry, metrics = jax.lax.scan(
             train_step, training_carry, None, num_updates
         )
-        final_model = eqx.combine(final_carry[4], static)
 
-        return final_model.counts, metrics
+        return metrics
 
     return run
 
@@ -403,7 +405,7 @@ if __name__ == "__main__":
     t0 = time.time()
     rngs = jax.random.split(rng, args.num_seeds)
     compiled_run = jax.jit(jax.vmap(make_run(args)))
-    counts, metrics = jax.block_until_ready(compiled_run(rngs))
+    metrics = jax.block_until_ready(compiled_run(rngs))
     print(f"Total time: {time.time() - t0}")
 
     metrics_path = save_path / "metrics.npz"

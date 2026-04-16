@@ -11,7 +11,7 @@ class BaseNetworkConfig:
 
 @dataclasses.dataclass(frozen=True)
 class QNetwork(BaseNetworkConfig):
-    type: Literal["q_network_counts"] = "q_network"
+    type: Literal["q_network"] = "q_network"
     hidden_size: int = 256
     learnable_norm_params: bool = True
 
