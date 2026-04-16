@@ -15,10 +15,15 @@ def epsilon_greedy(random_key, epsilon, q_values):
     selected_q_values = q_values[batch_indices, action_selection]
     return action_selection, selected_q_values
 
+
 """
 Epsilon-greedy action selection that incorporates both extrinsic and intrinsic Q-values
 """
-def epsilon_greedy_with_intrinsic_q_values(random_key, epsilon, extrinsic_q_values, intrinsic_q_values, beta):
+
+
+def epsilon_greedy_with_intrinsic_q_values(
+    random_key, epsilon, extrinsic_q_values, intrinsic_q_values, beta
+):
     # Choose action
     action_key, epsilon_key = jax.random.split(random_key)
 
@@ -28,7 +33,10 @@ def epsilon_greedy_with_intrinsic_q_values(random_key, epsilon, extrinsic_q_valu
 
     epsilon_matrix = jax.random.uniform(epsilon_key, shape=max_action.shape)
     random_action = jax.random.randint(
-        action_key, shape=max_action.shape, minval=0, maxval=extrinsic_q_values.shape[-1]
+        action_key,
+        shape=max_action.shape,
+        minval=0,
+        maxval=extrinsic_q_values.shape[-1],
     )
     action_selection = jnp.where(epsilon_matrix < epsilon, random_action, max_action)
     batch_indices = jnp.arange(extrinsic_q_values.shape[0])

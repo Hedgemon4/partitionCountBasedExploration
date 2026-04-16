@@ -16,7 +16,8 @@ from jax import Array
 
 import configs.defaults as configs
 from exploration import epsilon_greedy
-from netwoks import QNetwork
+from helper_functions import update_ema
+from netwoks import QNetworkCounts
 from wrappers import FlattenObservationWrapper, LogWrapper
 
 """
@@ -71,13 +72,13 @@ def make_env(environment_name, episode_length):
 
     return env, vmap_reset, vmap_step, env_params
 
+
 def make_run(args):
     num_updates = int(args.total_time_steps // args.num_environments // args.num_steps)
 
     # Environment Setup
     episode_length = getattr(args, "episode_length", None)
     env, vmap_reset, vmap_step, env_params = make_env(args.environment, episode_length)
-    ### TODO: Add support for non-gymnax environments
 
     input_size = int(env.observation_space(env_params).shape[0])
     num_actions = int(env.action_space(env_params).n)
@@ -85,7 +86,7 @@ def make_run(args):
     def run(key):
         # Network Setup
         key, subkey = jax.random.split(key, 2)
-        initial_model = QNetwork(
+        initial_model = QNetworkCounts(
             input_size=input_size,
             num_actions=num_actions,
             key=subkey,
@@ -376,19 +377,6 @@ def make_run(args):
             intrinsic_episode_returns = infos["returned_intrinsic_returns"]
             episode_lengths = infos["returned_episode_lengths"]
             num_dones = is_done.sum()
-
-            def update_ema(current_ema, new_value, num_dones, alpha):
-                effective_alpha = 1 - (1 - alpha) ** num_dones
-                # If current_ema is NaN, it's the first episode; use the new_value directly
-                return jnp.where(
-                    num_dones > 0,
-                    jnp.where(
-                        jnp.isnan(current_ema),
-                        new_value,
-                        current_ema + effective_alpha * (new_value - current_ema),
-                    ),
-                    current_ema,
-                )
 
             mean_extrinsic_episode_return = jnp.sum(
                 is_done * extrinsic_episode_returns

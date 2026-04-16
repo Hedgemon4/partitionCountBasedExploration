@@ -1,4 +1,7 @@
+import dataclasses
 import time
+from pathlib import Path
+from typing import Union, Annotated
 
 import equinox as eqx
 import jax
@@ -8,9 +11,12 @@ import optax
 import tyro
 import gymnax
 import chex
+import yaml
 
-from configs.defaults import PQNCartpoleConfig
+import configs.defaults as configs
 from exploration import epsilon_greedy
+from helper_functions import update_ema
+from netwoks import QNetwork
 from wrappers import FlattenObservationWrapper, LogWrapper
 
 """
@@ -32,39 +38,17 @@ class Transition:
     done: chex.Array
 
 
-class QNetwork(eqx.Module):
-    layers: list
-
-    def __init__(self, input_size, num_actions, hidden_size, key):
-        key1, key2, key3 = jax.random.split(key, 3)
-
-        ### TODO: Might need to transpose for atari
-        self.layers = [
-            eqx.nn.Linear(in_features=input_size, out_features=hidden_size, key=key1),
-            eqx.nn.LayerNorm(
-                hidden_size,
-                use_weight=args.learnable_norm_params,
-                use_bias=args.learnable_norm_params,
-            ),
-            jax.nn.relu,
-            eqx.nn.Linear(in_features=hidden_size, out_features=hidden_size, key=key2),
-            eqx.nn.LayerNorm(
-                hidden_size,
-                use_weight=args.learnable_norm_params,
-                use_bias=args.learnable_norm_params,
-            ),
-            jax.nn.relu,
-            eqx.nn.Linear(in_features=hidden_size, out_features=num_actions, key=key3),
-        ]
-
-    def __call__(self, x):
-        for layer in self.layers:
-            x = layer(x)
-        return x
+@chex.dataclass(frozen=True)
+class EMAMetrics:
+    ema_alpha: float
+    extrinsic_return_ema: float
+    episode_length_ema: float
 
 
-def make_env(environment_name):
+def make_env(environment_name, episode_length):
     env, env_params = gymnax.make(environment_name)
+    if episode_length is not None:
+        env_params = env_params.replace(max_steps_in_episode=episode_length)
     env = FlattenObservationWrapper(env)
     env = LogWrapper(env)
     vmap_reset = lambda num_envs: lambda random_key: jax.vmap(
@@ -77,19 +61,12 @@ def make_env(environment_name):
     return env, vmap_reset, vmap_step, env_params
 
 
-def loss(model, states, actions, targets):
-    q_values = jax.vmap(model)(states)
-    index = jnp.arange(q_values.shape[0])
-    selected_q_values = q_values[index, actions]
-    return 0.5 * jnp.mean((selected_q_values - targets) ** 2), selected_q_values
-
-
 def make_run(args):
     num_updates = int(args.total_time_steps // args.num_environments // args.num_steps)
 
     # Environment Setup
-    env, vmap_reset, vmap_step, env_params = make_env(args.environment)
-    ### TODO: Add support for non-gymnax environments
+    episode_length = getattr(args, "episode_length", None)
+    env, vmap_reset, vmap_step, env_params = make_env(args.environment, episode_length)
 
     input_size = int(env.observation_space(env_params).shape[0])
     num_actions = int(env.action_space(env_params).n)
@@ -100,8 +77,8 @@ def make_run(args):
         initial_model = QNetwork(
             input_size=input_size,
             num_actions=num_actions,
-            hidden_size=args.hidden_size,
             key=subkey,
+            network_config=args.network,
         )
 
         optim = optax.chain(
@@ -138,6 +115,7 @@ def make_run(args):
         initial_action, initial_selected_q = epsilon_greedy(
             subkey, args.epsilon_start, initial_q_values
         )
+
         initial_env_carry = (
             key,
             start_env_state,
@@ -147,10 +125,11 @@ def make_run(args):
             initial_q_values,
         )
 
-        episode_return_ema = 0.0
-        episode_length_ema = 0.0
-        ema_alpha = 2 / (args.num_episodes_for_average + 1)
-        episode_metrics = (episode_return_ema, episode_length_ema)
+        episode_metrics = EMAMetrics(
+            ema_alpha=2 / (args.num_episodes_for_average + 1),
+            extrinsic_return_ema=jnp.nan,
+            episode_length_ema=jnp.nan,
+        )
 
         step_number = 0
         env_step = 0
@@ -253,7 +232,7 @@ def make_run(args):
                     reverse=True,
                 )
                 update_targets = jnp.concatenate((targets, initial_return[np.newaxis]))
-                # update_targets = targets
+
             else:
 
                 def targets(transition, gamma):
@@ -296,7 +275,7 @@ def make_run(args):
                     model = eqx.combine(model_params, static)
                     mini_batch, targets = batch
                     (loss_value, loss_q_values), grads = eqx.filter_value_and_grad(
-                        loss, has_aux=True
+                        type(model).loss, has_aux=True
                     )(model, mini_batch.state, mini_batch.action, targets)
                     updates, optimizer_state = optim.update(
                         grads, optimizer_state, eqx.filter(model, eqx.is_array)
@@ -331,33 +310,36 @@ def make_run(args):
             # Compute EMA of episode returns and lengths
 
             is_done = infos["returned_episode"]
-            episode_returns = infos["returned_episode_returns"]
+            extrinsic_episode_returns = infos["returned_episode_returns"]
             episode_lengths = infos["returned_episode_lengths"]
             num_dones = is_done.sum()
 
-            returns_ema, lengths_ema = train_episode_metrics
-
-            mean_episode_return = jnp.sum(is_done * episode_returns) / jnp.maximum(
-                num_dones, 1
-            )
-            effective_alpha = 1 - (1 - ema_alpha) ** num_dones
-            updated_returns_ema = jnp.where(
-                num_dones > 0,
-                returns_ema + effective_alpha * (mean_episode_return - returns_ema),
-                returns_ema,
+            mean_extrinsic_episode_return = jnp.sum(
+                is_done * extrinsic_episode_returns
+            ) / jnp.maximum(num_dones, 1)
+            updated_extrinsic_return_ema = update_ema(
+                train_episode_metrics.extrinsic_return_ema,
+                mean_extrinsic_episode_return,
+                num_dones,
+                train_episode_metrics.ema_alpha,
             )
 
             mean_episode_length = jnp.sum(is_done * episode_lengths) / jnp.maximum(
                 num_dones, 1
             )
-            updated_episode_lengths_ema = jnp.where(
-                num_dones > 0,
-                lengths_ema + effective_alpha * (mean_episode_length - lengths_ema),
-                lengths_ema,
+            updated_episode_lengths_ema = update_ema(
+                train_episode_metrics.episode_length_ema,
+                mean_episode_length,
+                num_dones,
+                train_episode_metrics.ema_alpha,
             )
 
-            metrics["moving_avg_return"] = updated_returns_ema
-            metrics["moving_avg_length"] = updated_episode_lengths_ema
+            # Update train episode metrics
+            updated_episode_metrics = EMAMetrics(
+                ema_alpha=train_episode_metrics.ema_alpha,
+                extrinsic_return_ema=updated_extrinsic_return_ema,
+                episode_length_ema=updated_episode_lengths_ema,
+            )
 
             return (
                 epoch_key,
@@ -366,7 +348,7 @@ def make_run(args):
                 final_env_carry,
                 epoch_params,
                 epoch_opt_state,
-                (updated_returns_ema, updated_episode_lengths_ema),
+                updated_episode_metrics,
             ), metrics
 
         training_carry = (
@@ -378,22 +360,53 @@ def make_run(args):
             initial_opt_state,
             episode_metrics,
         )
-        return jax.lax.scan(train_step, training_carry, None, num_updates)
+        final_carry, metrics = jax.lax.scan(
+            train_step, training_carry, None, num_updates
+        )
+        final_model = eqx.combine(final_carry[4], static)
+
+        return final_model.counts, metrics
 
     return run
 
 
+ConfigOptions = Union[
+    Annotated[
+        configs.PQNCartpoleConfig,
+        tyro.conf.subcommand(name="cartpole"),
+    ],
+    Annotated[
+        configs.PQNMountainCarConfig,
+        tyro.conf.subcommand(name="mountaincar"),
+    ],
+]
+
+
 if __name__ == "__main__":
-    args = tyro.cli(PQNCartpoleConfig)
+    args = tyro.cli(
+        ConfigOptions,
+        default=configs.PQNCartpoleConfig(),
+        config=(tyro.conf.CascadeSubcommandArgs,),
+    )
+
+    save_path = Path("data", args.output_folder_name)
+    save_path.mkdir(parents=True, exist_ok=True)
+
+    # Save config for reproducibility
+    config_path = save_path / "config.yaml"
+    with open(config_path, "w") as f:
+        yaml.dump(dataclasses.asdict(args), f)
+
     print("Starting Run")
     rng = jax.random.PRNGKey(args.seed)
 
     t0 = time.time()
     rngs = jax.random.split(rng, args.num_seeds)
     compiled_run = jax.jit(jax.vmap(make_run(args)))
-    item1, metrics = jax.block_until_ready(compiled_run(rngs))
-    print(f"Took: {time.time() - t0}")
+    counts, metrics = jax.block_until_ready(compiled_run(rngs))
+    print(f"Total time: {time.time() - t0}")
 
-    ### TODO: Add better logging of results
-    np.savez("data/" + args.metrics_file_name, **metrics)
+    metrics_path = save_path / "metrics.npz"
+    np.savez(metrics_path, **metrics)
+
     print("Finished Run")

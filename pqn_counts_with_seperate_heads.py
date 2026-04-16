@@ -75,6 +75,7 @@ def make_env(environment_name, episode_length):
 
     return env, vmap_reset, vmap_step, env_params
 
+
 def make_run(args):
     num_updates = int(args.total_time_steps // args.num_environments // args.num_steps)
 
@@ -125,10 +126,20 @@ def make_run(args):
         start_state, start_env_state = vmap_reset(args.num_environments)(subkey)
 
         # Get first actions
-        initial_extrinsic_q_values, initial_intrinsic_q_values, initial_discrete_state = jax.vmap(initial_model)(start_state)
+        (
+            initial_extrinsic_q_values,
+            initial_intrinsic_q_values,
+            initial_discrete_state,
+        ) = jax.vmap(initial_model)(start_state)
         key, subkey = jax.random.split(key, 2)
-        initial_action, initial_selected_extrinsic_q, initial_selected_intrinsic_q = epsilon_greedy_with_intrinsic_q_values(
-            subkey, args.epsilon_start, initial_extrinsic_q_values, initial_intrinsic_q_values, args.beta
+        initial_action, initial_selected_extrinsic_q, initial_selected_intrinsic_q = (
+            epsilon_greedy_with_intrinsic_q_values(
+                subkey,
+                args.epsilon_start,
+                initial_extrinsic_q_values,
+                initial_intrinsic_q_values,
+                args.beta,
+            )
         )
 
         # Initialize structure for computing intrinsic return metrics
@@ -197,10 +208,22 @@ def make_run(args):
                     args.num_environments
                 )(subkey, step_env_state, action)
                 # Get next actions
-                next_extrinsic_q_values, next_intrinsic_q_values, next_discrete_state = jax.vmap(model)(next_state)
+                (
+                    next_extrinsic_q_values,
+                    next_intrinsic_q_values,
+                    next_discrete_state,
+                ) = jax.vmap(model)(next_state)
                 key, subkey = jax.random.split(key, 2)
 
-                next_action, next_extrinsic_q, next_intrinsic_q = epsilon_greedy_with_intrinsic_q_values(subkey, epsilon, next_extrinsic_q_values, next_intrinsic_q_values, args.beta)
+                next_action, next_extrinsic_q, next_intrinsic_q = (
+                    epsilon_greedy_with_intrinsic_q_values(
+                        subkey,
+                        epsilon,
+                        next_extrinsic_q_values,
+                        next_intrinsic_q_values,
+                        args.beta,
+                    )
+                )
                 scaled_reward = reward * args.reward_scale
 
                 # Compute intrinsic reward
@@ -296,8 +319,7 @@ def make_run(args):
                 1 - transitions.done[-1]
             )  # If done, then no q value
             initial_extrinsic_return = (
-                transitions.reward[-1]
-                + args.gamma * last_extrinsic_q_value
+                transitions.reward[-1] + args.gamma * last_extrinsic_q_value
             )
 
             last_intrinsic_q_value = (
@@ -305,22 +327,26 @@ def make_run(args):
                 if args.sarsa_returns
                 else jnp.max(transitions.next_intrinsic_q_values[-1, :], axis=-1)
             )
-            last_intrinsic_q_value = last_intrinsic_q_value * (
-                1 - transitions.done[-1]
-            )
+            last_intrinsic_q_value = last_intrinsic_q_value * (1 - transitions.done[-1])
             initial_intrinsic_return = (
-                transitions.intrinsic_reward[-1]
-                + args.gamma * last_intrinsic_q_value
+                transitions.intrinsic_reward[-1] + args.gamma * last_intrinsic_q_value
             )
 
-            extrinsic_target_carry = (initial_extrinsic_return, last_extrinsic_q_value, initial_intrinsic_return, last_intrinsic_q_value)
+            extrinsic_target_carry = (
+                initial_extrinsic_return,
+                last_extrinsic_q_value,
+                initial_intrinsic_return,
+                last_intrinsic_q_value,
+            )
             final_extrinsic_target_carry, extrinsic_targets = jax.lax.scan(
                 lambda_targets,
                 extrinsic_target_carry,
                 jax.tree_util.tree_map(lambda x: x[:-1], transitions),
                 reverse=True,
             )
-            updated_extrinsic_targets = jnp.concatenate((extrinsic_targets, initial_extrinsic_return[np.newaxis]))
+            updated_extrinsic_targets = jnp.concatenate(
+                (extrinsic_targets, initial_extrinsic_return[np.newaxis])
+            )
 
             ### Compute intrinsic targets
             ### TODO: Fix lambda returns function to vmap over both targets at the same time and also fix the values it is using

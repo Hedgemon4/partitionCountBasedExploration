@@ -8,6 +8,44 @@ from activations import make_activation
 
 
 class QNetwork(eqx.Module):
+    layers: list
+
+    def __init__(self, input_size, num_actions, key, network_config):
+        key1, key2, key3 = jax.random.split(key, 3)
+        hidden_size = network_config.hidden_size
+        learnable_norm_params = network_config.learnable_norm_params
+
+        self.layers = [
+            eqx.nn.Linear(in_features=input_size, out_features=hidden_size, key=key1),
+            eqx.nn.LayerNorm(
+                hidden_size,
+                use_weight=learnable_norm_params,
+                use_bias=learnable_norm_params,
+            ),
+            jax.nn.relu,
+            eqx.nn.Linear(in_features=hidden_size, out_features=hidden_size, key=key2),
+            eqx.nn.LayerNorm(
+                hidden_size,
+                use_weight=learnable_norm_params,
+                use_bias=learnable_norm_params,
+            ),
+            jax.nn.relu,
+            eqx.nn.Linear(in_features=hidden_size, out_features=num_actions, key=key3),
+        ]
+
+    def __call__(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+    def loss(self, states, actions, targets):
+        q_values = jax.vmap(self)(states)
+        index = jnp.arange(q_values.shape[0])
+        selected_q_values = q_values[index, actions]
+        return 0.5 * jnp.mean((selected_q_values - targets) ** 2), selected_q_values
+
+
+class QNetworkCounts(eqx.Module):
     block1: list
     block2: list
     value_head: list
@@ -255,7 +293,7 @@ class QNetworkWithIntrinsicValueHead(eqx.Module):
         return extrinsic_output, intrinsic_output, discrete_representation
 
     def loss(self, states, actions, extrinsic_targets, intrinsic_targets):
-        extrinsic_q_values, intrinsic_q_values ,_ = jax.vmap(self)(states)
+        extrinsic_q_values, intrinsic_q_values, _ = jax.vmap(self)(states)
 
         # Compute extrinsic loss
         index = jnp.arange(extrinsic_q_values.shape[0])
@@ -265,7 +303,9 @@ class QNetworkWithIntrinsicValueHead(eqx.Module):
         # Compute intrinsic loss
         index = jnp.arange(intrinsic_q_values.shape[0])
         selected_intrinsic_q_values = intrinsic_q_values[index, actions]
-        intrinsic_loss = 0.5 * jnp.mean((selected_intrinsic_q_values - intrinsic_targets) ** 2)
+        intrinsic_loss = 0.5 * jnp.mean(
+            (selected_intrinsic_q_values - intrinsic_targets) ** 2
+        )
 
         total_loss = extrinsic_loss + intrinsic_loss
 

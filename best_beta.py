@@ -11,6 +11,7 @@ import scipy.stats as stats
 @dataclass
 class Args:
     """Find and plot the best performing run for each unique beta value."""
+
     # The root directory containing all the run subfolders
     root_dir: Path = Path("data/mountaincar_static_epsilon")
     # Metrics to analyze
@@ -37,7 +38,9 @@ class Args:
 def moving_average(x: np.ndarray, w: int):
     if w <= 1:
         return x
-    return np.apply_along_axis(lambda m: np.convolve(m, np.ones(w), "valid") / w, axis=1, arr=x)
+    return np.apply_along_axis(
+        lambda m: np.convolve(m, np.ones(w), "valid") / w, axis=1, arr=x
+    )
 
 
 def get_config_value(config: dict, key_path: str) -> Any:
@@ -62,7 +65,9 @@ def format_legend_label(folder_path: Path, legend_vars: Optional[List[str]]) -> 
     with open(config_file, "r") as f:
         config = yaml.safe_load(f)
 
-    label_parts = [f"{var.split('.')[-1]}: {get_config_value(config, var)}" for var in legend_vars]
+    label_parts = [
+        f"{var.split('.')[-1]}: {get_config_value(config, var)}" for var in legend_vars
+    ]
     return " | ".join(label_parts)
 
 
@@ -78,17 +83,37 @@ def matches_filters(folder_path: Path, args: Args) -> bool:
     except Exception:
         return False
 
-    if args.beta_filter is not None and config.get("beta") != args.beta_filter: return False
-    if args.max_grad_norm is not None and config.get("max_grad_norm") != args.max_grad_norm: return False
-    if args.epsilon_end is not None and config.get("epsilon_end") != args.epsilon_end: return False
+    if args.beta_filter is not None and config.get("beta") != args.beta_filter:
+        return False
+    if (
+        args.max_grad_norm is not None
+        and config.get("max_grad_norm") != args.max_grad_norm
+    ):
+        return False
+    if args.epsilon_end is not None and config.get("epsilon_end") != args.epsilon_end:
+        return False
 
     network_config = config.get("network", {})
-    if args.hidden_size is not None and network_config.get("hidden_size") != args.hidden_size: return False
-    if args.total_time_steps is not None and config.get("total_time_steps") != args.total_time_steps: return False
-    if args.learnable_norm is not None and network_config.get(
-        "learnable_norm_params") != args.learnable_norm: return False
-    if args.activation is not None and network_config.get("activation1", {}).get(
-        "type") != args.activation: return False
+    if (
+        args.hidden_size is not None
+        and network_config.get("hidden_size") != args.hidden_size
+    ):
+        return False
+    if (
+        args.total_time_steps is not None
+        and config.get("total_time_steps") != args.total_time_steps
+    ):
+        return False
+    if (
+        args.learnable_norm is not None
+        and network_config.get("learnable_norm_params") != args.learnable_norm
+    ):
+        return False
+    if (
+        args.activation is not None
+        and network_config.get("activation1", {}).get("type") != args.activation
+    ):
+        return False
 
     return True
 
@@ -108,7 +133,9 @@ def get_beta_from_config(folder_path: Path) -> float:
         return None
 
 
-def load_run_data(folder_path: Path, metric_name: str) -> Tuple[np.ndarray, np.ndarray, float, np.ndarray]:
+def load_run_data(
+    folder_path: Path, metric_name: str
+) -> Tuple[np.ndarray, np.ndarray, float, np.ndarray]:
     """Loads metrics and calculates the final score."""
     metrics_file = folder_path / "metrics.npz"
     if not metrics_file.exists():
@@ -131,8 +158,14 @@ def load_run_data(folder_path: Path, metric_name: str) -> Tuple[np.ndarray, np.n
         return None, None, None, None
 
 
-def plot_beta_curves(best_runs: Dict[float, Dict[str, Any]], sorted_betas: List[float],
-                     metric_key: str, metric_title: str, output_path: Path, smooth: int):
+def plot_beta_curves(
+    best_runs: Dict[float, Dict[str, Any]],
+    sorted_betas: List[float],
+    metric_key: str,
+    metric_title: str,
+    output_path: Path,
+    smooth: int,
+):
     """Helper function to plot learning curves for a specific metric."""
     fig, ax = plt.subplots(figsize=(10, 6))
     colors = plt.cm.get_cmap("tab10", len(sorted_betas))
@@ -145,11 +178,11 @@ def plot_beta_curves(best_runs: Dict[float, Dict[str, Any]], sorted_betas: List[
             continue
 
         smoothed_vals = moving_average(res[metric_key], smooth)
-        plot_steps = res["steps"][:smoothed_vals.shape[1]]
+        plot_steps = res["steps"][: smoothed_vals.shape[1]]
 
         mean = np.mean(smoothed_vals, axis=0)
         std_err = stats.sem(smoothed_vals, axis=0)
-        ci = std_err * stats.t.ppf((1 + 0.95) / 2., len(res[metric_key]) - 1)
+        ci = std_err * stats.t.ppf((1 + 0.95) / 2.0, len(res[metric_key]) - 1)
 
         label = f"Beta {b} | {res['legend_name']}"
 
@@ -158,7 +191,9 @@ def plot_beta_curves(best_runs: Dict[float, Dict[str, Any]], sorted_betas: List[
 
     ax.set_xlabel("Environment Steps")
     ax.set_ylabel(metric_title.replace("_", " ").title())
-    ax.set_title(f"Best Configurations per Beta: {metric_title.replace('_', ' ').title()}")
+    ax.set_title(
+        f"Best Configurations per Beta: {metric_title.replace('_', ' ').title()}"
+    )
     ax.grid(True, linestyle="--", alpha=0.7)
 
     fig.savefig(output_path, dpi=300, bbox_inches="tight")
@@ -205,7 +240,7 @@ def main(args: Args):
                 "score": score,
                 "final_seed_vals": final_seed_vals,
                 "beta": beta,
-                "folder_path": folder
+                "folder_path": folder,
             }
 
     if not best_runs_by_beta:
@@ -229,7 +264,14 @@ def main(args: Args):
 
     # Save a detached legend based on the extrinsic handles
     fig_leg = plt.figure(figsize=(10, len(sorted_betas) * 0.4))
-    fig_leg.legend(handles, labels, loc='center', ncol=1, frameon=False, prop={'family': 'monospace', 'size': 9})
+    fig_leg.legend(
+        handles,
+        labels,
+        loc="center",
+        ncol=1,
+        frameon=False,
+        prop={"family": "monospace", "size": 9},
+    )
     leg_out = args.output_dir / "legend_best_by_beta.png"
     fig_leg.savefig(leg_out, dpi=300, bbox_inches="tight")
     print(f"Saved separated legend to {leg_out}")
@@ -239,7 +281,12 @@ def main(args: Args):
     # ==========================================
     int_out = args.output_dir / "best_by_beta_intrinsic_curves.png"
     plot_beta_curves(
-        best_runs_by_beta, sorted_betas, "int_values", args.intrinsic_metric, int_out, args.smooth
+        best_runs_by_beta,
+        sorted_betas,
+        "int_values",
+        args.intrinsic_metric,
+        int_out,
+        args.smooth,
     )
 
     # ==========================================
@@ -250,13 +297,17 @@ def main(args: Args):
     data_to_plot = [best_runs_by_beta[b]["final_seed_vals"] for b in sorted_betas]
     box_labels = [f"Beta {b}" for b in sorted_betas]
 
-    ax2.boxplot(data_to_plot, labels=box_labels, patch_artist=True,
-                boxprops=dict(facecolor="lightblue", color="blue"),
-                medianprops=dict(color="red", linewidth=2))
+    ax2.boxplot(
+        data_to_plot,
+        labels=box_labels,
+        patch_artist=True,
+        boxprops=dict(facecolor="lightblue", color="blue"),
+        medianprops=dict(color="red", linewidth=2),
+    )
 
     ax2.set_ylabel(f"Final {args.metric.replace('_', ' ').title()} (Last 10%)")
     ax2.set_title("Variance Across Seeds (Best Configs per Beta)")
-    ax2.grid(axis='y', linestyle="--", alpha=0.7)
+    ax2.grid(axis="y", linestyle="--", alpha=0.7)
 
     box_out = args.output_dir / "best_by_beta_seed_variance.png"
     fig2.savefig(box_out, dpi=300, bbox_inches="tight")

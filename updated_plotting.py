@@ -34,7 +34,7 @@ class Args:
         "output_folder_name",
         "seed",
         "total_time_steps",
-        "num_seeds"
+        "num_seeds",
     )
 
 
@@ -63,7 +63,7 @@ def process_metrics(filename: Path, metric_name: str, smooth_window: int):
 
         mean = moving_average(mean, smooth_window)
         ci = moving_average(ci, smooth_window)
-        steps = steps[:len(mean)]
+        steps = steps[: len(mean)]
 
         return steps, mean, ci
     except Exception as e:
@@ -71,7 +71,9 @@ def process_metrics(filename: Path, metric_name: str, smooth_window: int):
         return None, None, None
 
 
-def flatten_dict(d: Dict[str, Any], parent_key: str = '', sep: str = '.') -> Dict[str, Any]:
+def flatten_dict(
+    d: Dict[str, Any], parent_key: str = "", sep: str = "."
+) -> Dict[str, Any]:
     """Flattens a nested dictionary using dot notation for keys."""
     items = []
     for k, v in d.items():
@@ -97,7 +99,7 @@ def main(args: Args):
         if not metrics_path.exists():
             continue
 
-        with open(config_path, 'r') as f:
+        with open(config_path, "r") as f:
             try:
                 config_data = yaml.safe_load(f)
                 flat_config = flatten_dict(config_data)
@@ -118,13 +120,17 @@ def main(args: Args):
 
         # Determine which configuration values ACTUALLY vary within this specific group
         # This prevents our legends from having 30 parameters listed
-        all_keys = set(k for _, config in items for k in config.keys()
-                       if k not in args.group_by and k not in args.ignore_in_labels)
+        all_keys = set(
+            k
+            for _, config in items
+            for k in config.keys()
+            if k not in args.group_by and k not in args.ignore_in_labels
+        )
 
         varying_keys = []
         for key in all_keys:
             # Check if there is more than 1 unique value for this key in the current group
-            unique_values = set(str(config.get(key, 'N/A')) for _, config in items)
+            unique_values = set(str(config.get(key, "N/A")) for _, config in items)
             if len(unique_values) > 1:
                 varying_keys.append(key)
 
@@ -152,10 +158,12 @@ def main(args: Args):
         ax.grid(True, linestyle="--", alpha=0.7)
 
         # Move legend outside the plot area so it doesn't overlap the data
-        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
 
         # Create a safe filename using the group key
-        safe_key = "_".join([str(k).replace("=", "-").replace("/", "-") for k in group_key])
+        safe_key = "_".join(
+            [str(k).replace("=", "-").replace("/", "-") for k in group_key]
+        )
         filename = f"{args.metric}_{safe_key}.png"
 
         fig.savefig(args.output_dir / filename, dpi=300, bbox_inches="tight")

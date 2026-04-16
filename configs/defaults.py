@@ -3,7 +3,12 @@ import chex
 from configs.activations import ActivationConfig
 from dataclasses import field
 from configs.activations import FTA, Relu
-from configs.networks import QNetworkCounts, NetworkConfig, QNetworkMountainCarCounts
+from configs.networks import (
+    QNetworkCounts,
+    NetworkConfig,
+    QNetworkMountainCarCounts,
+    QNetwork,
+)
 
 
 @chex.dataclass(frozen=True)
@@ -43,29 +48,68 @@ class PQNOriginalCartpoleConfig:
 
 @chex.dataclass(frozen=True)
 class PQNCartpoleConfig:
-    seed: int = 0
-    num_seeds: int = 30
+    # Experiment Configs
+    output_folder_name: str = "pqn_cartpole"
+
+    # Algorithm Configs
     initial_learning_rate: float = 0.0001
     final_learning_rate: float = 1e-20
-    environment: str = "CartPole-v1"
-    num_environments: int = 32
-    num_steps: int = 64
-    total_time_steps: int = 5e5
-    epsilon_start: float = 1.0
-    epsilon_end: float = 0.2
-    epsilon_decay: float = 0.2
     num_epochs: int = 4
     num_minibatches: int = 16
-    hidden_size: int = 256
     gamma: float = 0.99
     lambda_returns: bool = True
     lam: float = 0.95
-    max_grad_norm: float = 10
+    max_grad_norm: float = 10.0
     reward_scale: float = 0.1
-    num_episodes_for_average: int = 30
-    learnable_norm_params: bool = True
     sarsa_returns: bool = True
-    metrics_file_name: str = "pqn_cartpole_with_sarsa_default_params.npz"
+
+    # Env Configs
+    environment: str = "CartPole-v1"
+    episode_length: int = 200
+    num_environments: int = 32
+    num_steps: int = 64
+    total_time_steps: float = 5e5
+
+    # Exploration Configs
+    epsilon_start: float = 1.0
+    epsilon_end: float = 0.01
+    epsilon_decay: float = 0.2
+
+    # Network Activation Configs
+    network: NetworkConfig = QNetwork()
+
+
+@chex.dataclass(frozen=True)
+class PQNMountainCarConfig:
+    # Experiment Configs
+    output_folder_name: str = "pqn_mountaincar"
+
+    # Algorithm Configs
+    initial_learning_rate: float = 0.004
+    final_learning_rate: float = 0.004
+    num_epochs: int = 8
+    num_minibatches: int = 16
+    gamma: float = 0.99
+    lambda_returns: bool = True
+    lam: float = 0.95
+    max_grad_norm: float = 100.0
+    reward_scale: float = 1.0
+    sarsa_returns: bool = True
+
+    # Env Configs
+    environment: str = "MountainCar-v0"
+    episode_length: int = 200
+    num_environments: int = 32
+    num_steps: int = 64
+    total_time_steps: float = 5e5
+
+    # Exploration Configs
+    epsilon_start: float = 1.0
+    epsilon_end: float = 0.01
+    epsilon_decay: float = 0.2
+
+    # Network Activation Configs
+    network: NetworkConfig = QNetwork()
 
 
 @chex.dataclass(frozen=True)

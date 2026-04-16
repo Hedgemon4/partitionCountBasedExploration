@@ -10,6 +10,17 @@ class BaseNetworkConfig:
 
 
 @dataclasses.dataclass(frozen=True)
+class QNetwork(BaseNetworkConfig):
+    type: Literal["q_network_counts"] = "q_network"
+    hidden_size: int = 256
+    learnable_norm_params: bool = True
+
+    # Network Activation Configs
+    activation1: ActivationConfig = Relu()
+    activation2: ActivationConfig = Relu()
+
+
+@dataclasses.dataclass(frozen=True)
 class QNetworkCounts(BaseNetworkConfig):
     type: Literal["q_network_counts"] = "q_network_counts"
     hidden_size: int = 64
@@ -33,4 +44,6 @@ class QNetworkMountainCarCounts(BaseNetworkConfig):
     activation2: ActivationConfig = Relu()
 
 
-NetworkConfig = Union[QNetworkCounts, QNetworkMountainCarCounts, BaseNetworkConfig]
+NetworkConfig = Union[
+    QNetwork, QNetworkCounts, QNetworkMountainCarCounts, BaseNetworkConfig
+]
