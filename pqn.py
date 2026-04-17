@@ -12,6 +12,7 @@ import chex
 from configs.defaults import PQNCartpoleConfig
 from exploration import epsilon_greedy
 from wrappers import FlattenObservationWrapper, LogWrapper
+from env_registeration import make
 
 """
 PQN implementation based on https://github.com/mttga/purejaxql/blob/main/purejaxql/pqn_gymnax.py
@@ -64,7 +65,7 @@ class QNetwork(eqx.Module):
 
 
 def make_env(environment_name):
-    env, env_params = gymnax.make(environment_name)
+    env, env_params = make(environment_name)
     env = FlattenObservationWrapper(env)
     env = LogWrapper(env)
     vmap_reset = lambda num_envs: lambda random_key: jax.vmap(
