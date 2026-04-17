@@ -7,21 +7,30 @@ from typing import List, Tuple, Optional, Any
 from pathlib import Path
 import warnings
 import scipy.stats as stats
+# Import shared histogram helpers so every bin-usage plot across the project
+# uses the exact same format (stacked by action, seed std error bars, per-seed
+# dots, percentage labels, outlier annotation).
+from count_histogram import (
+    plot_histogram_with_actions,
+    plot_neuron_summary,
+    find_outlier_seeds,
+    aggregate_counts,
+)
 
 
 @dataclass
 class Args:
     """Analyze and plot specific runs from a large hyperparameter sweep."""
 
-    root_dir: Path = Path("data/mountaincar_longer_runs")
+    root_dir: Path = Path("data/mountaincar_pqn_baseline_sweep")
     metric: str = "extrinsic_return_ema"
-    intrinsic_metric: str = "intrinsic_return_ema"
+    intrinsic_metric: str = None
     top_k: int = 10
     smooth: int = 1
-    output_dir: Path = Path("graphs/mountaincar_longer_runs/timesteps_1e6/top_10/")
+    output_dir: Path = Path("graphs/mountaincar_pqn_baseline_sweep/top_10/auc/")
 
     # --- SCORING PARAMETERS ---
-    score_metric: str = "last_10pct"
+    score_metric: str = "auc"
     """How to rank runs for top-k selection. Options:
       last_10pct  - mean over the final 10%% of timesteps (original behaviour)
       auc         - area under the curve (trapezoidal, normalised by x-range)
@@ -33,12 +42,12 @@ class Args:
 
     # --- FILTER PARAMETERS ---
     beta: Optional[float] = None
-    activation: Optional[str] = "fta"
+    activation: Optional[str] = None
     max_grad_norm: Optional[float] = None
     epsilon_end: Optional[float] = None
     hidden_size: Optional[int] = None
     learnable_norm: Optional[bool] = None
-    total_time_steps: Optional[float] = 1e6
+    total_time_steps: Optional[float] = None
 
 
 def moving_average(x: np.ndarray, w: int):
@@ -238,18 +247,19 @@ def main(args: Args):
     )
 
     # 2. Intrinsic Curves
-    intrinsic_res = []
-    for res in top_results:
-        s, v, _, _ = load_run_data(res["folder"], args.intrinsic_metric)
-        intrinsic_res.append({"name": res["name"], "steps": s, "values": v})
+    if args.intrinsic_metric is not None:
+        intrinsic_res = []
+        for res in top_results:
+            s, v, _, _ = load_run_data(res["folder"], args.intrinsic_metric)
+            intrinsic_res.append({"name": res["name"], "steps": s, "values": v})
 
-    plot_curves(
-        intrinsic_res,
-        args.intrinsic_metric,
-        args.output_dir / "intrinsic_reward_curves.png",
-        f"Intrinsic Reward Curves (Top {len(top_results)} Runs)",
-        args.smooth,
-    )
+        plot_curves(
+            intrinsic_res,
+            args.intrinsic_metric,
+            args.output_dir / "intrinsic_reward_curves.png",
+            f"Intrinsic Reward Curves (Top {len(top_results)} Runs)",
+            args.smooth,
+        )
 
     # 3. Box Plot for Variance
     fig_box, ax_box = plt.subplots(figsize=(12, 6))
@@ -285,6 +295,109 @@ def main(args: Args):
         dpi=300,
         bbox_inches="tight",
     )
+
+    # 5. Count histograms — one per top-k run and a combined comparison
+    _plot_count_histograms(top_results, args)
+
+
+def _plot_count_histograms(top_results, args: Args):
+    """For each top-k run, produce a bin-usage histogram in the same format
+    as graphing_scripts/count_histogram.py (stacked by action, seed std error
+    bars, per-seed dots, percentage labels, outlier annotation).
+
+    A combined side-by-side plot with a shared y-axis is also produced so
+    runs can be compared directly.
+    """
+    hist_dir = args.output_dir / "count_histograms"
+    hist_dir.mkdir(parents=True, exist_ok=True)
+
+    # Locate counts files up-front so we can skip runs that didn't log counts
+    runs_with_counts = []
+    for rank, res in enumerate(top_results, start=1):
+        folder = res["folder"]
+        candidates = [folder / "counts.npy", folder / "counts.npz.npy"]
+        counts_file = next((c for c in candidates if c.exists()), None)
+        if counts_file is None:
+            print(f"[hist] rank {rank} ({folder.name}): no counts file, skipping")
+            continue
+        runs_with_counts.append((rank, res, counts_file))
+
+    if not runs_with_counts:
+        print("[hist] No top-k runs have counts files; skipping histograms.")
+        return
+
+    # --- Per-run histograms ---------------------------------------------------
+    outlier_report_lines = []
+    for rank, res, counts_file in runs_with_counts:
+        folder = res["folder"]
+        counts = np.load(counts_file)
+        title = (
+            f"FTA bin usage  |  Rank {rank}  |  {folder.name}\n"
+            f"{res['name']}  (score={res['score']:.2f})  "
+            f"(error bars: seed std; stacks: per-action)"
+        )
+        out = hist_dir / f"hist_rank_{rank:02d}_{folder.name}.png"
+        _, outliers, _ = plot_histogram_with_actions(
+            counts, title=title, out_path=out, highlight=(rank == 1)
+        )
+        outlier_report_lines.append(
+            f"Rank {rank} | {folder.name} | score={res['score']:.2f} | "
+            f"outlier seeds: {[o['seed'] for o in outliers] if outliers else 'none'}"
+        )
+        # Per-neuron bin-activation summary for this run
+        neuron_out = hist_dir / f"neuron_summary_rank_{rank:02d}_{folder.name}.png"
+        plot_neuron_summary(
+            counts,
+            title_prefix=f"Rank {rank}  |  {folder.name}  (score={res['score']:.2f})",
+            out_path=neuron_out,
+        )
+
+    # --- Combined comparison plot with shared y-axis --------------------------
+    n = len(runs_with_counts)
+    ncols = min(n, 5)
+    nrows = (n + ncols - 1) // ncols
+    fig, axes = plt.subplots(
+        nrows, ncols, figsize=(6 * ncols, 6 * nrows), sharey=True, squeeze=False
+    )
+    for idx, (rank, res, counts_file) in enumerate(runs_with_counts):
+        r, c = divmod(idx, ncols)
+        ax = axes[r][c]
+        counts = np.load(counts_file)
+        plot_histogram_with_actions(
+            counts,
+            title=f"Rank {rank}  |  {res['folder'].name}  (score={res['score']:.2f})",
+            out_path=hist_dir,  # unused because ax is provided
+            highlight=(rank == 1),
+            ax=ax,
+            show_legend=(idx == 0),
+            show_outlier_box=True,
+        )
+        if c != 0:
+            ax.set_ylabel("")
+
+    # Hide any empty subplots (when n < nrows*ncols)
+    for idx in range(n, nrows * ncols):
+        r, c = divmod(idx, ncols)
+        axes[r][c].axis("off")
+
+    fig.suptitle(
+        f"FTA bin usage across top {n} runs  "
+        f"(error bars = seed std, dots = individual seeds, stacks = actions)",
+        fontsize=12,
+    )
+    fig.tight_layout()
+    combined_out = hist_dir / "hist_top_k_comparison.png"
+    fig.savefig(combined_out, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  saved {combined_out}")
+
+    # --- Outlier summary text file -------------------------------------------
+    report_path = hist_dir / "outlier_seeds.txt"
+    with open(report_path, "w") as f:
+        f.write("Outlier seeds per top-k run\n")
+        f.write("(Flagged when a bin is 0, an (action,bin) cell is 0, or |z|>2 for any bin)\n\n")
+        f.write("\n".join(outlier_report_lines))
+    print(f"  saved {report_path}")
 
 
 if __name__ == "__main__":
