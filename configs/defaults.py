@@ -204,6 +204,9 @@ class CartPoleWithIntrinsicRewardsConfig(BaseConfig):
     epsilon_end: float = 0.2
     epsilon_decay: float = 0.2
 
+    # Count Save Interval (0 = save only at end of training)
+    count_save_interval: float = 5e4
+
     # Network Activation Configs
     network: NetworkConfig = QNetworkCounts()
 
@@ -237,6 +240,9 @@ class MountainCarWithIntrinsicRewardsConfig(BaseConfig):
     epsilon_start: float = 1.0
     epsilon_end: float = 0.01
     epsilon_decay: float = 0.2
+
+    # Count Save Interval (0 = save only at end of training)
+    count_save_interval: float = 0
 
     # Network Activation Configs
     network: NetworkConfig = QNetworkMountainCarCounts()
