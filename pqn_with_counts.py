@@ -18,6 +18,7 @@ import configs.defaults as configs
 from exploration import epsilon_greedy
 from helper_functions import update_ema
 from netwoks import QNetworkCounts
+from observations_counting import ObservationCounts
 from wrappers import FlattenObservationWrapper, LogWrapper
 
 """
@@ -152,6 +153,15 @@ def make_run(args):
             episode_length_ema=jnp.nan,
         )
 
+        observation_counts = ObservationCounts(
+            observation_counts=jnp.zeros(
+                (num_actions, input_size, initial_model.num_bins), dtype=jnp.int32
+            ),
+            num_bins=initial_model.num_bins,
+            low=env.observation_space(env_params).low,
+            high=env.observation_space(env_params).high,
+        )
+
         step_number = 0
         env_step = 0
 
@@ -167,6 +177,7 @@ def make_run(args):
                 carry_params,
                 carry_opt_state,
                 train_episode_metrics,
+                carry_observation_counts,
             ) = carry
             epsilon = epsilon_schedule(step_number)
             model = eqx.combine(carry_params, static)
@@ -251,11 +262,18 @@ def make_run(args):
             env_step += args.num_steps * args.num_environments
 
             transitions, infos = intermediate_values
-            flat_states = transitions.discrete_state.reshape(
+            flat_discrete_state = transitions.discrete_state.reshape(
                 -1, *transitions.discrete_state.shape[-2:]
             )
+            flat_discrete_actions = transitions.action.reshape(-1)
+            model = model.update_counts(flat_discrete_state, flat_discrete_actions)
+
+            # Update Observation counts
+            flat_states = transitions.state.reshape(-1, transitions.state.shape[-1])
             flat_actions = transitions.action.reshape(-1)
-            model = model.update_counts(flat_states, flat_actions)
+            updated_observation_counts = carry_observation_counts.update_counts(
+                flat_states, flat_actions
+            )
 
             # Compute Targets
             if args.lambda_returns:
@@ -428,6 +446,7 @@ def make_run(args):
                 epoch_params,
                 epoch_opt_state,
                 updated_episode_metrics,
+                updated_observation_counts,
             ), metrics
 
         training_carry = (
@@ -438,13 +457,15 @@ def make_run(args):
             dynamic_params,
             initial_opt_state,
             episode_metrics,
+            observation_counts,
         )
         final_carry, metrics = jax.lax.scan(
             train_step, training_carry, None, num_updates
         )
         final_model = eqx.combine(final_carry[4], static)
+        observation_counts = final_carry[-1]
 
-        return final_model.counts, metrics
+        return final_model.counts, observation_counts, metrics
 
     return run
 
@@ -481,7 +502,7 @@ if __name__ == "__main__":
     t0 = time.time()
     rngs = jax.random.split(rng, args.num_seeds)
     compiled_run = jax.jit(jax.vmap(make_run(args)))
-    counts, metrics = jax.block_until_ready(compiled_run(rngs))
+    counts, observation_counts, metrics = jax.block_until_ready(compiled_run(rngs))
     print(f"Total time: {time.time() - t0}")
 
     metrics_path = save_path / "metrics.npz"
@@ -489,4 +510,8 @@ if __name__ == "__main__":
 
     counts_path = save_path / "counts.npy"
     np.save(counts_path, counts)
+
+    counts_path = save_path / "observation_counts.npy"
+    np.save(counts_path, observation_counts)
+
     print("Finished Run")

@@ -9,6 +9,7 @@ from activations import make_activation
 
 class QNetwork(eqx.Module):
     layers: list
+    num_bins: int = 10
 
     def __init__(self, input_size, num_actions, key, network_config):
         key1, key2, key3 = jax.random.split(key, 3)
@@ -55,6 +56,7 @@ class QNetworkCounts(eqx.Module):
     value_head: list
     counts: Array
     count_layer: int
+    num_bins: int
 
     def __init__(self, input_size, num_actions, key, network_config):
         key1, key2, key3 = jax.random.split(key, 3)
@@ -70,15 +72,15 @@ class QNetworkCounts(eqx.Module):
         num_bins_2 = getattr(activation_layer_2, "num_bins", 1)
 
         if self.count_layer == 1:
-            number_of_discrete_states = num_bins_1
+            self.num_bins = num_bins_1
         elif self.count_layer == 2:
-            number_of_discrete_states = num_bins_2
+            self.num_bins = num_bins_2
         else:
             raise ValueError(
                 "Count layer must be either 1 or 2, indicating which activation layer to use for the discrete representation"
             )
 
-        if number_of_discrete_states < 2:
+        if self.num_bins < 2:
             raise ValueError(
                 "Count layer must have at least two bins to have a discrete representation"
             )
@@ -86,7 +88,7 @@ class QNetworkCounts(eqx.Module):
         hidden_size = network_config.hidden_size
         learnable_norm_params = network_config.learnable_norm_params
 
-        self.counts = jnp.ones((num_actions, hidden_size, number_of_discrete_states))
+        self.counts = jnp.ones((num_actions, hidden_size, self.num_bins))
 
         # Determine the width of the second linear layer's input.
         second_linear_width = num_bins_1 * hidden_size
@@ -178,6 +180,7 @@ class QNetworkWithIntrinsicValueHead(eqx.Module):
     intrinsic_value_head: list
     counts: Array
     count_layer: int
+    num_bins: int
 
     def __init__(self, input_size, num_actions, key, network_config):
         key1, key2, key3, key4 = jax.random.split(key, 4)
@@ -193,15 +196,15 @@ class QNetworkWithIntrinsicValueHead(eqx.Module):
         num_bins_2 = getattr(activation_layer_2, "num_bins", 1)
 
         if self.count_layer == 1:
-            number_of_discrete_states = num_bins_1
+            self.num_bins = num_bins_1
         elif self.count_layer == 2:
-            number_of_discrete_states = num_bins_2
+            self.num_bins = num_bins_2
         else:
             raise ValueError(
                 "Count layer must be either 1 or 2, indicating which activation layer to use for the discrete representation"
             )
 
-        if number_of_discrete_states < 2:
+        if self.num_bins < 2:
             raise ValueError(
                 "Count layer must have at least two bins to have a discrete representation"
             )
@@ -209,7 +212,7 @@ class QNetworkWithIntrinsicValueHead(eqx.Module):
         hidden_size = network_config.hidden_size
         learnable_norm_params = network_config.learnable_norm_params
 
-        self.counts = jnp.ones((num_actions, hidden_size, number_of_discrete_states))
+        self.counts = jnp.ones((num_actions, hidden_size, self.num_bins))
 
         # Determine the width of the second linear layer's input.
         second_linear_width = num_bins_1 * hidden_size
