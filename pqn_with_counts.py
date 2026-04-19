@@ -13,12 +13,13 @@ import gymnax
 import chex
 import yaml
 from jax import Array
+from navix import observations
 
 import configs.defaults as configs
 from exploration import epsilon_greedy
 from helper_functions import update_ema
 from netwoks import QNetworkCounts
-from wrappers import FlattenObservationWrapper, LogWrapper
+from wrappers import FlattenObservationWrapper, LogWrapper, NavixGymnaxWrapper, NavixFlattenObservationWrapper
 
 """
 PQN implementation based on https://github.com/mttga/purejaxql/blob/main/purejaxql/pqn_gymnax.py
@@ -58,10 +59,20 @@ class IntrinsicRewardData:
 
 
 def make_env(environment_name, episode_length):
-    env, env_params = gymnax.make(environment_name)
-    if episode_length is not None:
-        env_params = env_params.replace(max_steps_in_episode=episode_length)
-    env = FlattenObservationWrapper(env)
+    if environment_name.startswith("Navix-"):
+        # navix environments use a Timestep-based API; NavixGymnaxWrapper adapts
+        # them to the same (reset/step) interface as gymnax.
+        import navix
+        navix_env = navix.make(environment_name, observation_fn=observations.symbolic)
+        navix_env = NavixFlattenObservationWrapper(navix_env)
+        env = NavixGymnaxWrapper(navix_env)
+        env_params = None  # navix does not use a separate params object
+    else:
+        env, env_params = gymnax.make(environment_name)
+        if episode_length is not None:
+            env_params = env_params.replace(max_steps_in_episode=episode_length)
+        env = FlattenObservationWrapper(env)
+
     env = LogWrapper(env)
     vmap_reset = lambda num_envs: lambda random_key: jax.vmap(
         env.reset, in_axes=(0, None)
@@ -457,6 +468,10 @@ ConfigOptions = Union[
     Annotated[
         configs.MountainCarWithIntrinsicRewardsConfig,
         tyro.conf.subcommand(name="mountaincar"),
+    ],
+    Annotated[
+        configs.DoorKeyWithIntrinsicRewardsConfig,
+        tyro.conf.subcommand(name="doorkey"),
     ],
 ]
 

@@ -7,6 +7,7 @@ from configs.networks import (
     QNetworkCounts,
     NetworkConfig,
     QNetworkMountainCarCounts,
+    QNetworkDoorKeyCounts,
     QNetwork,
 )
 
@@ -240,3 +241,36 @@ class MountainCarWithIntrinsicRewardsConfig(BaseConfig):
 
     # Network Activation Configs
     network: NetworkConfig = QNetworkMountainCarCounts()
+
+
+@chex.dataclass(frozen=True)
+class DoorKeyWithIntrinsicRewardsConfig(BaseConfig):
+    # Experiment Configs
+    output_folder_name: str = "pqn_doorkey_with_intrinsic_rewards"
+
+    # Algorithm Configs
+    initial_learning_rate: float = 0.0001
+    final_learning_rate: float = 1e-20
+    num_epochs: int = 4
+    num_minibatches: int = 16
+    gamma: float = 0.99
+    lambda_returns: bool = True
+    lam: float = 0.95
+    max_grad_norm: float = 10.0
+    reward_scale: float = 1.0
+    sarsa_returns: bool = True
+
+    # Env Configs — change to Navix-DoorKey-6x6-v0 or 8x8 for harder variants
+    environment: str = "Navix-DoorKey-5x5-v0"
+    num_environments: int = 32
+    num_steps: int = 128
+    total_time_steps: float = 2e6
+
+    # Exploration Configs — higher beta for sparse-reward exploration
+    beta: float = 0.5
+    epsilon_start: float = 1.0
+    epsilon_end: float = 0.01
+    epsilon_decay: float = 0.3
+
+    # Network Activation Configs
+    network: NetworkConfig = QNetworkDoorKeyCounts()
