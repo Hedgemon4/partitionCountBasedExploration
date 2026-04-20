@@ -201,5 +201,5 @@ class NavixGymnaxWrapper:
         new_timestep = self._env.step(timestep, action)
         obs = new_timestep.observation.astype(jnp.float32)
         reward = new_timestep.reward
-        done = new_timestep.last()
+        done = new_timestep.is_done()
         return obs, new_timestep, reward, done, {}
