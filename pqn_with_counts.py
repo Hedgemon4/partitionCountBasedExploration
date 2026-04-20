@@ -153,13 +153,12 @@ def make_run(args):
             episode_length_ema=jnp.nan,
         )
 
-        observation_counts = ObservationCounts(
-            observation_counts=jnp.zeros(
-                (num_actions, input_size, initial_model.num_bins), dtype=jnp.int32
-            ),
+        # Get the distribution of states and actions if we just had a num_bins by num_bins grid
+        observation_counts = ObservationCounts.create(
             num_bins=initial_model.num_bins,
             low=env.observation_space(env_params).low,
             high=env.observation_space(env_params).high,
+            num_actions=num_actions,
         )
 
         step_number = 0
@@ -442,6 +441,16 @@ def make_run(args):
             step_model = eqx.combine(epoch_params, static)
             step_counts = step_model.counts
             step_obs_counts = updated_observation_counts
+
+            # Also compute the observation counts based on what Simone mentioned here
+            obs_dim = updated_observation_counts.low.shape[0]
+            grids = [jnp.linspace(updated_observation_counts.low[i], updated_observation_counts.high[i], updated_observation_counts.num_bins) for i in range(obs_dim)]
+
+            mesh = jnp.meshgrid(*grids, indexing='ij')
+            # (N ** obs_dim, obs_dim)
+            grid_points = jnp.stack(mesh, axis=-1).reshape(-1, obs_dim)
+
+            ### TODO: Finish this part
 
             return (
                 epoch_key,
