@@ -77,16 +77,6 @@ def make_env(environment_name, episode_length):
 def make_run(args):
     num_updates = int(args.total_time_steps // args.num_environments // args.num_steps)
 
-    # Determine how many update steps between each count snapshot.
-    # count_save_interval <= 0 means save only at the end (one chunk = full run).
-    _raw_interval = getattr(args, "count_save_interval", 0)
-    count_save_interval = _raw_interval if _raw_interval > 0 else num_updates
-    assert num_updates % count_save_interval == 0, (
-        f"num_updates ({num_updates}) must be divisible by "
-        f"count_save_interval ({count_save_interval})"
-    )
-    num_chunks = num_updates // count_save_interval
-
     # Environment Setup
     episode_length = getattr(args, "episode_length", None)
     env, vmap_reset, vmap_step, env_params = make_env(args.environment, episode_length)
@@ -448,6 +438,11 @@ def make_run(args):
             metrics["length_ema"] = updated_episode_lengths_ema
             metrics["intrinsic_return_ema"] = updated_intrinsic_return_ema
 
+            # Capture count snapshots at this update step
+            step_model = eqx.combine(epoch_params, static)
+            step_counts = step_model.counts
+            step_obs_counts = updated_observation_counts
+
             return (
                 epoch_key,
                 step_number,
@@ -457,7 +452,7 @@ def make_run(args):
                 epoch_opt_state,
                 updated_episode_metrics,
                 updated_observation_counts,
-            ), metrics
+            ), (metrics, step_counts, step_obs_counts)
 
         training_carry = (
             key,
@@ -470,34 +465,18 @@ def make_run(args):
             observation_counts,
         )
 
-        # Outer scan: runs num_chunks iterations, each collecting count_save_interval
-        # training steps. After every chunk, the current counts and observation counts
-        # are captured so they can be saved at regular intervals.
-        def train_chunk(carry, _):
-            chunk_final_carry, chunk_metrics = jax.lax.scan(
-                train_step, carry, None, count_save_interval
-            )
-            # Extract count snapshots from this chunk's final carry
-            chunk_model = eqx.combine(chunk_final_carry[4], static)
-            chunk_counts = chunk_model.counts
-            chunk_obs_counts = chunk_final_carry[-1]  # updated ObservationCounts
-            return chunk_final_carry, (chunk_counts, chunk_obs_counts, chunk_metrics)
-
-        final_carry, (counts_history, obs_counts_history, metrics) = jax.lax.scan(
-            train_chunk, training_carry, None, num_chunks
-        )
-
-        # metrics are shaped (num_chunks, count_save_interval, ...) — flatten to
-        # (num_updates, ...) to preserve the same shape as before.
-        metrics = jax.tree_util.tree_map(
-            lambda x: x.reshape(-1, *x.shape[2:]), metrics
+        # Single scan over all update steps. counts and obs_counts are returned
+        # at every step (shape: (num_updates, ...)) so __main__ can select
+        # whichever timesteps it wants to save — no divisibility constraint needed.
+        final_carry, (metrics, counts_history, obs_counts_history) = jax.lax.scan(
+            train_step, training_carry, None, num_updates
         )
 
         final_model = eqx.combine(final_carry[4], static)
         observation_counts = final_carry[-1]
 
-        # counts_history      : (num_chunks, *counts_shape)
-        # obs_counts_history  : ObservationCounts with leaves (num_chunks, ...)
+        # counts_history      : (num_updates, *counts_shape)
+        # obs_counts_history  : ObservationCounts with leaves (num_updates, ...)
         return (
             final_model.counts,
             observation_counts,
@@ -538,10 +517,8 @@ if __name__ == "__main__":
     print("Starting Run")
     rng = jax.random.PRNGKey(args.seed)
 
-    # Resolve count_save_interval so we can label snapshot files correctly.
     num_updates = int(args.total_time_steps // args.num_environments // args.num_steps)
-    _raw_interval = getattr(args, "count_save_interval", 0)
-    count_save_interval = _raw_interval if _raw_interval > 0 else num_updates
+    timesteps_per_update = int(args.num_steps * args.num_environments)
 
     t0 = time.time()
     rngs = jax.random.split(rng, args.num_seeds)
@@ -555,24 +532,35 @@ if __name__ == "__main__":
     np.savez(metrics_path, **metrics)
 
     # Save final counts
-    counts_path = save_path / "counts.npy"
+    counts_path = save_path / "final_counts.npy"
     np.save(counts_path, counts)
 
-    obs_counts_path = save_path / "observation_counts.npy"
+    obs_counts_path = save_path / "final_observation_counts.npy"
     np.save(obs_counts_path, observation_counts.observation_counts)
 
     # Save count snapshots at each interval.
-    # After vmap the history arrays have shape (num_seeds, num_chunks, ...).
-    num_chunks = counts_history.shape[1]
-    for i in range(num_chunks):
-        update_step = (i + 1) * count_save_interval
-        np.save(
-            save_path / f"counts_step_{update_step}.npy",
-            counts_history[:, i],
+    # counts_history and obs_counts_history have shape (num_seeds, num_updates, ...)
+    # after vmap. We find the update index closest to each desired timestep boundary
+    # and save that slice — no divisibility constraint required.
+    _raw_interval = getattr(args, "count_save_timestep_interval", 0)
+    if _raw_interval > 0:
+        save_interval_timesteps = int(_raw_interval)
+        boundaries = range(
+            save_interval_timesteps,
+            num_updates * timesteps_per_update + 1,
+            save_interval_timesteps,
         )
-        np.save(
-            save_path / f"observation_counts_step_{update_step}.npy",
-            obs_counts_history.observation_counts[:, i],
-        )
+        for boundary in boundaries:
+            # Update index whose end-of-step timestep is closest to this boundary
+            idx = min(round(boundary / timesteps_per_update) - 1, num_updates - 1)
+            actual_timestep = (idx + 1) * timesteps_per_update
+            np.save(
+                save_path / f"counts_timestep_{actual_timestep}.npy",
+                counts_history[:, idx],
+            )
+            np.save(
+                save_path / f"observation_counts_timestep_{actual_timestep}.npy",
+                obs_counts_history.observation_counts[:, idx],
+            )
 
     print("Finished Run")
