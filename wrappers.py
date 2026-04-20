@@ -117,3 +117,24 @@ class LogWrapper(GymnaxWrapper):
         info["timestep"] = state.timestep
         info["returned_episode"] = done
         return obs, state, reward, done, info
+    
+class PessimisticMountainCarWrapper(GymnaxWrapper):
+    def __init__(self, env: environment.Environment):
+        super().__init__(env)
+
+    @partial(jax.jit, static_argnums=(0,))
+    def step(
+        self,
+        key: chex.PRNGKey,
+        state: environment.EnvState,
+        action: Union[int, float],
+        params: Optional[environment.EnvParams] = None,
+    ) -> Tuple[chex.Array, environment.EnvState, float, bool, dict]:
+        obs, state, reward, done, info = self._env.step(key, state, action, params)
+        goal_reached = (state.position >= params.goal_position) * (
+            state.velocity >= params.goal_velocity
+        )
+        reward = jnp.where(goal_reached, 1.0, 0.0)
+        return obs, state, reward, done, info
+
+    
