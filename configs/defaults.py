@@ -6,7 +6,6 @@ from configs.activations import FTA, Relu
 from configs.networks import (
     QNetworkCounts,
     NetworkConfig,
-    QNetworkMountainCarCounts,
     QNetwork,
 )
 
@@ -239,4 +238,4 @@ class MountainCarWithIntrinsicRewardsConfig(BaseConfig):
     epsilon_decay: float = 0.2
 
     # Network Activation Configs
-    network: NetworkConfig = QNetworkMountainCarCounts()
+    network: NetworkConfig = QNetworkCounts()

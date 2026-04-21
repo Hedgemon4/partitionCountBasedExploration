@@ -8,42 +8,28 @@ from configs.activations import ActivationConfig, FTA, Relu
 class BaseNetworkConfig:
     type: str = "unknown"
 
+@dataclasses.dataclass(frozen=True)
+class Block:
+    hidden_size: int = 64
+    learnable_norm_params: bool = True
+    activation: ActivationConfig = Relu()
+
+@dataclasses.dataclass(frozen=True)
+class FTABlock(Block):
+    activation: ActivationConfig = FTA()
+
 
 @dataclasses.dataclass(frozen=True)
 class QNetwork(BaseNetworkConfig):
     type: Literal["q_network"] = "q_network"
-    hidden_size: int = 256
-    learnable_norm_params: bool = True
-
-    # Network Activation Configs
-    activation1: ActivationConfig = Relu()
-    activation2: ActivationConfig = Relu()
-
+    blocks: list[Block] = dataclasses.field(default_factory=lambda: [Block(), Block()])
 
 @dataclasses.dataclass(frozen=True)
 class QNetworkCounts(BaseNetworkConfig):
     type: Literal["q_network_counts"] = "q_network_counts"
-    hidden_size: int = 64
-    learnable_norm_params: bool = False
     count_layer: int = 1
-
-    # Network Activation Configs
-    activation1: ActivationConfig = FTA()
-    activation2: ActivationConfig = Relu()
-
-
-@dataclasses.dataclass(frozen=True)
-class QNetworkMountainCarCounts(BaseNetworkConfig):
-    type: Literal["q_network_counts"] = "q_network_counts"
-    hidden_size: int = 64
-    learnable_norm_params: bool = True
-    count_layer: int = 1
-
-    # Network Activation Configs
-    activation1: ActivationConfig = FTA()
-    activation2: ActivationConfig = Relu()
-
+    blocks: list[Block] = dataclasses.field(default_factory=lambda: [FTABlock(), Block()])
 
 NetworkConfig = Union[
-    QNetwork, QNetworkCounts, QNetworkMountainCarCounts, BaseNetworkConfig
+    QNetwork, QNetworkCounts, BaseNetworkConfig
 ]

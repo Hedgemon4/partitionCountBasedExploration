@@ -11,31 +11,36 @@ class QNetwork(eqx.Module):
     layers: list
 
     def __init__(self, input_size, num_actions, key, network_config):
-        key1, key2, key3 = jax.random.split(key, 3)
-        hidden_size = network_config.hidden_size
-        learnable_norm_params = network_config.learnable_norm_params
+        self.layers = []
+        blocks = network_config.blocks
+        keys = jax.random.split(key, len(blocks) + 1)
 
-        # Instantiate both activation layers
-        activation_layer_1 = make_activation(network_config.activation1)
-        activation_layer_2 = make_activation(network_config.activation2)
+        for i, block in enumerate(blocks):
+            hidden_size = block.hidden_size
+            learnable_norm_params = block.learnable_norm_params
 
-        self.layers = [
-            eqx.nn.Linear(in_features=input_size, out_features=hidden_size, key=key1),
-            eqx.nn.LayerNorm(
-                hidden_size,
-                use_weight=learnable_norm_params,
-                use_bias=learnable_norm_params,
-            ),
-            activation_layer_1,
-            eqx.nn.Linear(in_features=hidden_size, out_features=hidden_size, key=key2),
-            eqx.nn.LayerNorm(
-                hidden_size,
-                use_weight=learnable_norm_params,
-                use_bias=learnable_norm_params,
-            ),
-            activation_layer_2,
-            eqx.nn.Linear(in_features=hidden_size, out_features=num_actions, key=key3),
-        ]
+             # For the first block, input size is the environment's observation space, for the second block, input size is the hidden size of the previous block
+            in_features = input_size if i == 0 else blocks[i-1].hidden_size
+
+             # For the last block, output size is the number of actions, for previous blocks, output size is the hidden size
+            out_features = hidden_size
+
+            self.layers.append(
+                eqx.nn.Linear(in_features=in_features, out_features=out_features, key=keys[i])
+            )
+
+            self.layers.append(
+                eqx.nn.LayerNorm(
+                    out_features,
+                    use_weight=learnable_norm_params,
+                    use_bias=learnable_norm_params,
+                )
+            )
+            self.layers.append(make_activation(block.activation))
+
+        self.layers.append(eqx.nn.Linear(in_features=blocks[-1].hidden_size, out_features=num_actions, key=keys[-1]))
+        print(self.layers)
+
 
     def __call__(self, x):
         for layer in self.layers:
@@ -57,9 +62,37 @@ class QNetworkCounts(eqx.Module):
     count_layer: int
 
     def __init__(self, input_size, num_actions, key, network_config):
-        key1, key2, key3 = jax.random.split(key, 3)
-
+        self.blocks = []
         self.count_layer = network_config.count_layer
+        blocks = network_config.blocks
+        keys = jax.random.split(key, len(blocks) + 1)
+
+        for i, block in enumerate(blocks):
+            hidden_size = block.hidden_size
+            learnable_norm_params = block.learnable_norm_params
+
+             # For the first block, input size is the environment's observation space, for the second block, input size is the hidden size of the previous block
+            in_features = input_size if i == 0 else blocks[i-1].hidden_size
+
+             # For the last block, output size is the number of actions, for previous blocks, output size is the hidden size
+            out_features = hidden_size
+
+            self.layers.append(
+                eqx.nn.Linear(in_features=in_features, out_features=out_features, key=keys[i])
+            )
+
+            self.layers.append(
+                eqx.nn.LayerNorm(
+                    out_features,
+                    use_weight=learnable_norm_params,
+                    use_bias=learnable_norm_params,
+                )
+            )
+            activation = make_activation(block.activation)
+            self.layers.append(activation)
+
+        self.layers.append(eqx.nn.Linear(in_features=blocks[-1].hidden_size, out_features=num_actions, key=keys[-1]))
+        print(self.layers)
 
         # Instantiate both activation layers
         activation_layer_1 = make_activation(network_config.activation1)
@@ -154,15 +187,20 @@ class QNetworkCounts(eqx.Module):
         discrete_activation = (
             first_activation if self.count_layer == 1 else second_activation
         )
+        discrete_representation = self._discrete_representation(discrete_activation)
 
+        return x, discrete_representation
+
+    def _discrete_representation(self, discrete_activation):
         # If the left linear tile is active, then it will be negative so won't be chosen by argmax, but should be used as the one hot
         left_linear_active = discrete_activation[:, 0] < 0.0
         argmax = jnp.argmax(discrete_activation, axis=-1)
         # Either the left linear tile if active, or the argmax of the rest of the tiles
         final_indices = jnp.where(left_linear_active, 0, argmax)
         discrete_representation = one_hot(final_indices, discrete_activation.shape[-1])
+        return discrete_representation
 
-        return x, discrete_representation
+    # def get_discrete_representation(self, states):
 
     def loss(self, states, actions, targets):
         q_values, _ = jax.vmap(self)(states)
