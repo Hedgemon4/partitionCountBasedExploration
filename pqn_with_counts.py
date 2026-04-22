@@ -18,7 +18,7 @@ import configs.defaults as configs
 from exploration import epsilon_greedy
 from helper_functions import update_ema
 from netwoks import QNetworkCounts
-from wrappers import FlattenObservationWrapper, LogWrapper
+from wrappers import FlattenObservationWrapper, LogWrapper, PessimisticMountainCarWrapper
 
 """
 PQN implementation based on https://github.com/mttga/purejaxql/blob/main/purejaxql/pqn_gymnax.py
@@ -57,11 +57,15 @@ class IntrinsicRewardData:
     returned_intrinsic_return: Array
 
 
-def make_env(environment_name, episode_length):
+def make_env(args, episode_length):
+    environment_name = args.environment
     env, env_params = gymnax.make(environment_name)
     if episode_length is not None:
         env_params = env_params.replace(max_steps_in_episode=episode_length)
     env = FlattenObservationWrapper(env)
+    if environment_name == "MountainCar-v0" and args.pessimistic:
+        print("Using pessimistic wrapper for MountainCar")
+        env = PessimisticMountainCarWrapper(env)
     env = LogWrapper(env)
     vmap_reset = lambda num_envs: lambda random_key: jax.vmap(
         env.reset, in_axes=(0, None)
@@ -78,7 +82,7 @@ def make_run(args):
 
     # Environment Setup
     episode_length = getattr(args, "episode_length", None)
-    env, vmap_reset, vmap_step, env_params = make_env(args.environment, episode_length)
+    env, vmap_reset, vmap_step, env_params = make_env(args, episode_length)
 
     input_size = int(env.observation_space(env_params).shape[0])
     num_actions = int(env.action_space(env_params).n)
@@ -463,7 +467,7 @@ ConfigOptions = Union[
 if __name__ == "__main__":
     args = tyro.cli(
         ConfigOptions,
-        default=configs.CartPoleWithIntrinsicRewardsConfig(),
+        default=configs.MountainCarWithIntrinsicRewardsConfig(),
         config=(tyro.conf.CascadeSubcommandArgs,),
     )
 
