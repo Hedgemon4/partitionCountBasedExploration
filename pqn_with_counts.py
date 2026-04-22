@@ -59,7 +59,8 @@ class IntrinsicRewardData:
     returned_intrinsic_return: Array
 
 
-def make_env(environment_name, episode_length):
+def make_env(args, episode_length):
+    environment_name = args.environment
     if environment_name.startswith("Navix-"):
         # navix environments use a Timestep-based API; NavixGymnaxWrapper adapts
         # them to the same (reset/step) interface as gymnax.
