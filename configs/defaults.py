@@ -224,6 +224,7 @@ class MountainCarWithIntrinsicRewardsConfig(BaseConfig):
     max_grad_norm: float = 100.0
     reward_scale: float = 1.0
     sarsa_returns: bool = True
+    pessimistic: bool = False
 
     # Env Configs
     environment: str = "MountainCar-v0"
