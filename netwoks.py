@@ -136,7 +136,6 @@ class QNetworkCounts(eqx.Module):
             ),
         ]
 
-
     def update_counts(self, discrete_states, actions):
         updated_counts = self.counts.at[actions].add(discrete_states)
         return eqx.tree_at(lambda m: m.counts, self, updated_counts)
