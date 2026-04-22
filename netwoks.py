@@ -19,14 +19,16 @@ class QNetwork(eqx.Module):
             hidden_size = block.hidden_size
             learnable_norm_params = block.learnable_norm_params
 
-             # For the first block, input size is the environment's observation space, for the second block, input size is the hidden size of the previous block
-            in_features = input_size if i == 0 else blocks[i-1].hidden_size
+            # For the first block, input size is the environment's observation space, for the second block, input size is the hidden size of the previous block
+            in_features = input_size if i == 0 else blocks[i - 1].hidden_size
 
-             # For the last block, output size is the number of actions, for previous blocks, output size is the hidden size
+            # For the last block, output size is the number of actions, for previous blocks, output size is the hidden size
             out_features = hidden_size
 
             self.layers.append(
-                eqx.nn.Linear(in_features=in_features, out_features=out_features, key=keys[i])
+                eqx.nn.Linear(
+                    in_features=in_features, out_features=out_features, key=keys[i]
+                )
             )
 
             self.layers.append(
@@ -38,9 +40,14 @@ class QNetwork(eqx.Module):
             )
             self.layers.append(make_activation(block.activation))
 
-        self.layers.append(eqx.nn.Linear(in_features=blocks[-1].hidden_size, out_features=num_actions, key=keys[-1]))
+        self.layers.append(
+            eqx.nn.Linear(
+                in_features=blocks[-1].hidden_size,
+                out_features=num_actions,
+                key=keys[-1],
+            )
+        )
         print(self.layers)
-
 
     def __call__(self, x):
         for layer in self.layers:
@@ -71,14 +78,16 @@ class QNetworkCounts(eqx.Module):
             hidden_size = block.hidden_size
             learnable_norm_params = block.learnable_norm_params
 
-             # For the first block, input size is the environment's observation space, for the second block, input size is the hidden size of the previous block
-            in_features = input_size if i == 0 else blocks[i-1].hidden_size
+            # For the first block, input size is the environment's observation space, for the second block, input size is the hidden size of the previous block
+            in_features = input_size if i == 0 else blocks[i - 1].hidden_size
 
-             # For the last block, output size is the number of actions, for previous blocks, output size is the hidden size
+            # For the last block, output size is the number of actions, for previous blocks, output size is the hidden size
             out_features = hidden_size
 
             self.layers.append(
-                eqx.nn.Linear(in_features=in_features, out_features=out_features, key=keys[i])
+                eqx.nn.Linear(
+                    in_features=in_features, out_features=out_features, key=keys[i]
+                )
             )
 
             self.layers.append(
@@ -91,8 +100,13 @@ class QNetworkCounts(eqx.Module):
             activation = make_activation(block.activation)
             self.layers.append(activation)
 
-        self.layers.append(eqx.nn.Linear(in_features=blocks[-1].hidden_size, out_features=num_actions, key=keys[-1]))
-        print(self.layers)
+        self.layers.append(
+            eqx.nn.Linear(
+                in_features=blocks[-1].hidden_size,
+                out_features=num_actions,
+                key=keys[-1],
+            )
+        )
 
         # Instantiate both activation layers
         activation_layer_1 = make_activation(network_config.activation1)

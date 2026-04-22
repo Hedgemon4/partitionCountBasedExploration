@@ -3,11 +3,7 @@ import chex
 from configs.activations import ActivationConfig
 from dataclasses import field
 from configs.activations import FTA, Relu
-from configs.networks import (
-    QNetworkCounts,
-    NetworkConfig,
-    QNetwork,
-)
+from configs.networks import QNetworkCounts, NetworkConfig, QNetwork, QNetworkCartpole
 
 
 @chex.dataclass(frozen=True)
@@ -74,7 +70,7 @@ class PQNCartpoleConfig(BaseConfig):
     epsilon_decay: float = 0.2
 
     # Network Activation Configs
-    network: NetworkConfig = QNetwork()
+    network: NetworkConfig = QNetworkCartpole()
 
 
 @chex.dataclass(frozen=True)

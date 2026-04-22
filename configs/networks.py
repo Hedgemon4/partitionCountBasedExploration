@@ -8,11 +8,13 @@ from configs.activations import ActivationConfig, FTA, Relu
 class BaseNetworkConfig:
     type: str = "unknown"
 
+
 @dataclasses.dataclass(frozen=True)
 class Block:
     hidden_size: int = 64
     learnable_norm_params: bool = True
     activation: ActivationConfig = Relu()
+
 
 @dataclasses.dataclass(frozen=True)
 class FTABlock(Block):
@@ -24,12 +26,22 @@ class QNetwork(BaseNetworkConfig):
     type: Literal["q_network"] = "q_network"
     blocks: list[Block] = dataclasses.field(default_factory=lambda: [Block(), Block()])
 
+
+@dataclasses.dataclass(frozen=True)
+class QNetworkCartpole(BaseNetworkConfig):
+    type: Literal["q_network"] = "q_network"
+    blocks: list[Block] = dataclasses.field(
+        default_factory=lambda: [Block(hidden_size=256), Block(hidden_size=256)]
+    )
+
+
 @dataclasses.dataclass(frozen=True)
 class QNetworkCounts(BaseNetworkConfig):
     type: Literal["q_network_counts"] = "q_network_counts"
     count_layer: int = 1
-    blocks: list[Block] = dataclasses.field(default_factory=lambda: [FTABlock(), Block()])
+    blocks: list[Block] = dataclasses.field(
+        default_factory=lambda: [FTABlock(), Block()]
+    )
 
-NetworkConfig = Union[
-    QNetwork, QNetworkCounts, BaseNetworkConfig
-]
+
+NetworkConfig = Union[QNetwork, QNetworkCartpole, QNetworkCounts, BaseNetworkConfig]
