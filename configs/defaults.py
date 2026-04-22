@@ -261,7 +261,7 @@ class DoorKeyWithIntrinsicRewardsConfig(BaseConfig):
     sarsa_returns: bool = True
 
     # Env Configs — change to Navix-DoorKey-6x6-v0 or 8x8 for harder variants
-    environment: str = "Navix-DoorKey-5x5-v0"
+    environment: str = "Navix-DoorKey-8x8-v0"
     num_environments: int = 32
     num_steps: int = 128
     total_time_steps: float = 2e6
