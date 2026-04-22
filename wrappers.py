@@ -137,74 +137,6 @@ class LogWrapper(GymnaxWrapper):
         return obs, state, reward, done, info
 
 
-class NavixGymnaxWrapper:
-    """Adapts a navix environment to the gymnax-style API used throughout this project.
-
-    navix uses a Timestep-based API (reset(key) -> Timestep, step(timestep, action) -> Timestep),
-    whereas this project expects gymnax's API (reset(key, params) -> (obs, state),
-    step(key, state, action, params) -> (obs, state, reward, done, info)).
-
-    This wrapper bridges that gap so NavixGymnaxWrapper can be passed directly into
-    FlattenObservationWrapper and LogWrapper without any other changes.
-    """
-
-    def __init__(self, navix_env):
-        if not _NAVIX_AVAILABLE:
-            raise ImportError(
-                "navix is not installed. Run: pip install navix"
-            )
-        self._env = navix_env
-        # Probe observation shape with a single dummy reset (runs once at init, not during training)
-        dummy_timestep = navix_env.reset(jax.random.PRNGKey(0))
-        self._obs_shape = dummy_timestep.observation.shape
-        self._num_actions = int(navix_env.action_space.n)
-
-    def __getattr__(self, name):
-        return getattr(self._env, name)
-
-    def observation_space(self, params=None) -> spaces.Box:
-        """Return a gymnax-compatible Box matching the navix observation shape."""
-        return spaces.Box(
-            low=0.0,
-            high=255.0,
-            shape=self._obs_shape,
-            dtype=np.float32,
-        )
-
-    def action_space(self, params=None) -> spaces.Discrete:
-        """Return a gymnax-compatible Discrete matching the navix action count."""
-        return spaces.Discrete(self._num_actions)
-
-    def reset(
-        self, key: chex.PRNGKey, params=None
-    ) -> Tuple[chex.Array, object]:
-        """Reset the environment and return (obs, timestep).
-
-        The returned timestep is used as the 'state' token passed to step().
-        """
-        timestep = self._env.reset(key)
-        obs = timestep.observation.astype(jnp.float32)
-        return obs, timestep
-
-    def step(
-        self,
-        key: chex.PRNGKey,
-        timestep,
-        action: Union[int, float],
-        params=None,
-    ) -> Tuple[chex.Array, object, float, bool, dict]:
-        """Step the environment.
-
-        key is accepted for API compatibility but ignored (navix is deterministic
-        given the timestep; stochasticity lives inside the navix state).
-        """
-        new_timestep = self._env.step(timestep, action)
-        obs = new_timestep.observation.astype(jnp.float32)
-        reward = new_timestep.reward
-        done = new_timestep.is_done()
-        return obs, new_timestep, reward, done, {}
-    
-
 
 class NavixGymnaxWrapper:
     def __init__(self, navix_env):
@@ -230,3 +162,24 @@ class NavixGymnaxWrapper:
         return spaces.Discrete(
             num_categories=self._env.action_space.maximum.item() + 1,
         )
+    
+class PessimisticMountainCarWrapper(GymnaxWrapper):
+    def __init__(self, env: environment.Environment):
+        super().__init__(env)
+
+    @partial(jax.jit, static_argnums=(0,))
+    def step(
+        self,
+        key: chex.PRNGKey,
+        state: environment.EnvState,
+        action: Union[int, float],
+        params: Optional[environment.EnvParams] = None,
+    ) -> Tuple[chex.Array, environment.EnvState, float, bool, dict]:
+        obs, state, reward, done, info = self._env.step(key, state, action, params)
+        goal_reached = (state.position >= params.goal_position) * (
+            state.velocity >= params.goal_velocity
+        )
+        reward = jnp.where(goal_reached, 1.0, 0.0)
+        return obs, state, reward, done, info
+
+    
