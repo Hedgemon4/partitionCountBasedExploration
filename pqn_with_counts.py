@@ -19,7 +19,11 @@ from exploration import epsilon_greedy
 from helper_functions import update_ema
 from netwoks import QNetworkCounts
 from observations_counting import ObservationCounts
-from wrappers import FlattenObservationWrapper, LogWrapper, PessimisticMountainCarWrapper
+from wrappers import (
+    FlattenObservationWrapper,
+    LogWrapper,
+    PessimisticMountainCarWrapper,
+)
 
 """
 PQN implementation based on https://github.com/mttga/purejaxql/blob/main/purejaxql/pqn_gymnax.py

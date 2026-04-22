@@ -117,7 +117,8 @@ class LogWrapper(GymnaxWrapper):
         info["timestep"] = state.timestep
         info["returned_episode"] = done
         return obs, state, reward, done, info
-    
+
+
 class PessimisticMountainCarWrapper(GymnaxWrapper):
     def __init__(self, env: environment.Environment):
         super().__init__(env)
@@ -136,5 +137,3 @@ class PessimisticMountainCarWrapper(GymnaxWrapper):
         )
         reward = jnp.where(goal_reached, 1.0, 0.0)
         return obs, state, reward, done, info
-
-    
