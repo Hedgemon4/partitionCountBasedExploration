@@ -62,8 +62,7 @@ class QNetwork(eqx.Module):
 
 
 class QNetworkCounts(eqx.Module):
-    block1: list
-    block2: list
+    blocks: list
     value_head: list
     counts: Array
     count_layer: int
@@ -73,101 +72,74 @@ class QNetworkCounts(eqx.Module):
         self.count_layer = network_config.count_layer
         blocks = network_config.blocks
         keys = jax.random.split(key, len(blocks) + 1)
+        number_of_discrete_states = 0
 
+        input_features = input_size
+        previous_bins = 1
         for i, block in enumerate(blocks):
+            layer = []
             hidden_size = block.hidden_size
             learnable_norm_params = block.learnable_norm_params
 
-            # For the first block, input size is the environment's observation space, for the second block, input size is the hidden size of the previous block
-            in_features = input_size if i == 0 else blocks[i - 1].hidden_size
+            # We need to flatten the output of the activation if there were multiple bins in the previous layer, since each bin will be treated as a separate feature for the next layer
+            if previous_bins > 1:
+                layer.append(eqx.nn.Lambda(jnp.ravel))
 
-            # For the last block, output size is the number of actions, for previous blocks, output size is the hidden size
-            out_features = hidden_size
-
-            self.layers.append(
+            layer.append(
                 eqx.nn.Linear(
-                    in_features=in_features, out_features=out_features, key=keys[i]
+                    in_features=input_features, out_features=hidden_size, key=keys[i]
                 )
             )
 
-            self.layers.append(
+            layer.append(
                 eqx.nn.LayerNorm(
-                    out_features,
+                    hidden_size,
                     use_weight=learnable_norm_params,
                     use_bias=learnable_norm_params,
                 )
             )
             activation = make_activation(block.activation)
-            self.layers.append(activation)
+            num_bins = getattr(activation, "num_bins", 1)
 
-        self.layers.append(
+            if self.count_layer == i + 1:
+                # This will be the layer which outputs the discrete representation, so we need to get the bin size
+                number_of_discrete_states = num_bins
+                if number_of_discrete_states < 2:
+                    raise ValueError(
+                        "Count layer must have at least two bins to have a discrete representation"
+                    )
+            layer.append(activation)
+
+            self.blocks.append(layer)
+
+            # Compute the number of input features for the next layer, which will be the hidden size times the number of bins for the current activation
+            input_features = hidden_size * num_bins
+            previous_bins = num_bins
+
+        if number_of_discrete_states == 0:
+            raise ValueError(
+                "Count layer must be set to a valid block number to have a discrete representation for counts"
+            )
+
+        self.counts = jnp.ones(
+            (
+                num_actions,
+                blocks[self.count_layer - 1].hidden_size,
+                number_of_discrete_states,
+            )
+        )
+
+        self.value_head = [
             eqx.nn.Linear(
                 in_features=blocks[-1].hidden_size,
                 out_features=num_actions,
                 key=keys[-1],
-            )
-        )
-
-        # Instantiate both activation layers
-        activation_layer_1 = make_activation(network_config.activation1)
-        activation_layer_2 = make_activation(network_config.activation2)
-
-        # Initialize Counts
-        num_bins_1 = getattr(activation_layer_1, "num_bins", 1)
-        num_bins_2 = getattr(activation_layer_2, "num_bins", 1)
-
-        if self.count_layer == 1:
-            number_of_discrete_states = num_bins_1
-        elif self.count_layer == 2:
-            number_of_discrete_states = num_bins_2
-        else:
-            raise ValueError(
-                "Count layer must be either 1 or 2, indicating which activation layer to use for the discrete representation"
-            )
-
-        if number_of_discrete_states < 2:
-            raise ValueError(
-                "Count layer must have at least two bins to have a discrete representation"
-            )
-
-        hidden_size = network_config.hidden_size
-        learnable_norm_params = network_config.learnable_norm_params
-
-        self.counts = jnp.ones((num_actions, hidden_size, number_of_discrete_states))
-
-        # Determine the width of the second linear layer's input.
-        second_linear_width = num_bins_1 * hidden_size
-        final_linear_width = num_bins_2 * hidden_size
-
-        self.block1 = [
-            eqx.nn.Linear(in_features=input_size, out_features=hidden_size, key=key1),
-            eqx.nn.LayerNorm(
-                hidden_size,
-                use_weight=learnable_norm_params,
-                use_bias=learnable_norm_params,
-            ),
-            activation_layer_1,
-        ]
-        self.block2 = [
-            eqx.nn.Lambda(jnp.ravel),
-            eqx.nn.Linear(
-                in_features=second_linear_width,
-                out_features=hidden_size,
-                key=key2,
-            ),
-            eqx.nn.LayerNorm(
-                hidden_size,
-                use_weight=learnable_norm_params,
-                use_bias=learnable_norm_params,
-            ),
-            activation_layer_2,
-        ]
-        self.value_head = [
-            eqx.nn.Lambda(jnp.ravel),
-            eqx.nn.Linear(
-                in_features=final_linear_width, out_features=num_actions, key=key3
             ),
         ]
+
+        for block in self.blocks:
+            print(block)
+        print(self.value_head)
 
     def update_counts(self, discrete_states, actions):
         updated_counts = self.counts.at[actions].add(discrete_states)
@@ -184,29 +156,23 @@ class QNetworkCounts(eqx.Module):
         # Explicitly indicate counts are not trainable
         jax.lax.stop_gradient(self.counts)
 
-        for layer in self.block1:
-            x = layer(x)
-
-        first_activation = x
-
-        for layer in self.block2:
-            x = layer(x)
-
-        second_activation = x
+        for i, block in enumerate(self.blocks):
+            for layer in block:
+                x = layer(x)
+            # Depending on which layer is being used for counts, select the appropriate activation for the discrete representation
+            if i + 1 == self.count_layer:
+                discrete_activation = x
 
         for layer in self.value_head:
             x = layer(x)
 
-        # Depending on which layer is being used for counts, select the appropriate activation for the discrete representation
-        discrete_activation = (
-            first_activation if self.count_layer == 1 else second_activation
-        )
         discrete_representation = self._discrete_representation(discrete_activation)
 
         return x, discrete_representation
 
     def _discrete_representation(self, discrete_activation):
         # If the left linear tile is active, then it will be negative so won't be chosen by argmax, but should be used as the one hot
+        # jax.debug.print("Discrete activation: {}", discrete_activation)
         left_linear_active = discrete_activation[:, 0] < 0.0
         argmax = jnp.argmax(discrete_activation, axis=-1)
         # Either the left linear tile if active, or the argmax of the rest of the tiles
@@ -214,7 +180,16 @@ class QNetworkCounts(eqx.Module):
         discrete_representation = one_hot(final_indices, discrete_activation.shape[-1])
         return discrete_representation
 
-    # def get_discrete_representation(self, states):
+    def get_discrete_representation(self, states):
+        for i, block in enumerate(self.blocks):
+            for layer in block:
+                x = layer(x)
+            # Depending on which layer is being used for counts, select the appropriate activation for the discrete representation
+            if i + 1 == self.count_layer:
+                discrete_activation = x
+                break
+
+        return self._discrete_representation(discrete_activation)
 
     def loss(self, states, actions, targets):
         q_values, _ = jax.vmap(self)(states)
