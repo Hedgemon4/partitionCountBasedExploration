@@ -47,7 +47,6 @@ class QNetwork(eqx.Module):
                 key=keys[-1],
             )
         )
-        print(self.layers)
 
     def __call__(self, x):
         for layer in self.layers:
@@ -137,9 +136,6 @@ class QNetworkCounts(eqx.Module):
             ),
         ]
 
-        for block in self.blocks:
-            print(block)
-        print(self.value_head)
 
     def update_counts(self, discrete_states, actions):
         updated_counts = self.counts.at[actions].add(discrete_states)
@@ -172,7 +168,6 @@ class QNetworkCounts(eqx.Module):
 
     def _discrete_representation(self, discrete_activation):
         # If the left linear tile is active, then it will be negative so won't be chosen by argmax, but should be used as the one hot
-        # jax.debug.print("Discrete activation: {}", discrete_activation)
         left_linear_active = discrete_activation[:, 0] < 0.0
         argmax = jnp.argmax(discrete_activation, axis=-1)
         # Either the left linear tile if active, or the argmax of the rest of the tiles
