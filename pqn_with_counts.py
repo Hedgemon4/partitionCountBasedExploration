@@ -585,20 +585,31 @@ if __name__ == "__main__":
             num_updates * timesteps_per_update + 1,
             save_interval_timesteps,
         )
+
+        # Create dirs for data
+        counts_path = save_path / "counts"
+        counts_path.mkdir(exist_ok=True)
+
+        observation_counts_path = save_path / "observation_counts"
+        observation_counts_path.mkdir(exist_ok=True)
+
+        grid_counts_path = save_path / "grid_counts"
+        grid_counts_path.mkdir(exist_ok=True)
+
         for boundary in boundaries:
             # Update index whose end-of-step timestep is closest to this boundary
             idx = min(round(boundary / timesteps_per_update) - 1, num_updates - 1)
             actual_timestep = (idx + 1) * timesteps_per_update
             np.save(
-                save_path / f"counts_timestep_{actual_timestep}.npy",
+                counts_path / f"counts_timestep_{actual_timestep}.npy",
                 counts_history[:, idx],
             )
             np.save(
-                save_path / f"observation_counts_timestep_{actual_timestep}.npy",
+                observation_counts_path / f"observation_counts_timestep_{actual_timestep}.npy",
                 obs_counts_history.observation_counts[:, idx],
             )
             np.save(
-                save_path / f"grid_discrete_timestep_{actual_timestep}.npy",
+                grid_counts_path / f"grid_discrete_timestep_{actual_timestep}.npy",
                 grid_discrete_history[:, idx],
             )
 
