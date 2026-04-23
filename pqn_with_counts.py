@@ -573,6 +573,9 @@ if __name__ == "__main__":
     obs_counts_path = save_path / "final_observation_counts.npy"
     np.save(obs_counts_path, observation_counts.observation_counts)
 
+    grid_discrete_path = save_path / "final_grid_discrete.npy"
+    np.save(grid_discrete_path, grid_discrete_history[:, -1])
+
     # Save count snapshots at each interval.
     # counts_history and obs_counts_history have shape (num_seeds, num_updates, ...)
     # after vmap. We find the update index closest to each desired timestep boundary
