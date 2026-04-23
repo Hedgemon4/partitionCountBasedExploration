@@ -452,13 +452,22 @@ def make_run(args):
 
             # Also compute the observation counts based on what Simone mentioned here
             obs_dim = updated_observation_counts.low.shape[0]
-            grids = [jnp.linspace(updated_observation_counts.low[i], updated_observation_counts.high[i], updated_observation_counts.num_bins) for i in range(obs_dim)]
+            num_bins = updated_observation_counts.observation_counts.shape[1]
+            grids = [
+                jnp.linspace(
+                    updated_observation_counts.low[i],
+                    updated_observation_counts.high[i],
+                    num_bins,
+                )
+                for i in range(obs_dim)
+            ]
 
-            mesh = jnp.meshgrid(*grids, indexing='ij')
+            mesh = jnp.meshgrid(*grids, indexing="ij")
             # (N ** obs_dim, obs_dim)
             grid_points = jnp.stack(mesh, axis=-1).reshape(-1, obs_dim)
-
-            ### TODO: Finish this part
+            grid_discrete = jax.vmap(step_model.get_discrete_representation)(
+                grid_points
+            )
 
             return (
                 epoch_key,
@@ -469,7 +478,7 @@ def make_run(args):
                 epoch_opt_state,
                 updated_episode_metrics,
                 updated_observation_counts,
-            ), (metrics, step_counts, step_obs_counts)
+            ), (metrics, step_counts, step_obs_counts, grid_discrete)
 
         training_carry = (
             key,
@@ -485,9 +494,12 @@ def make_run(args):
         # Single scan over all update steps. counts and obs_counts are returned
         # at every step (shape: (num_updates, ...)) so __main__ can select
         # whichever timesteps it wants to save — no divisibility constraint needed.
-        final_carry, (metrics, counts_history, obs_counts_history) = jax.lax.scan(
-            train_step, training_carry, None, num_updates
-        )
+        final_carry, (
+            metrics,
+            counts_history,
+            obs_counts_history,
+            grid_discrete_history,
+        ) = jax.lax.scan(train_step, training_carry, None, num_updates)
 
         final_model = eqx.combine(final_carry[4], static)
         observation_counts = final_carry[-1]
@@ -499,6 +511,7 @@ def make_run(args):
             observation_counts,
             counts_history,
             obs_counts_history,
+            grid_discrete_history,
             metrics,
         )
 
@@ -540,9 +553,14 @@ if __name__ == "__main__":
     t0 = time.time()
     rngs = jax.random.split(rng, args.num_seeds)
     compiled_run = jax.jit(jax.vmap(make_run(args)))
-    counts, observation_counts, counts_history, obs_counts_history, metrics = (
-        jax.block_until_ready(compiled_run(rngs))
-    )
+    (
+        counts,
+        observation_counts,
+        counts_history,
+        obs_counts_history,
+        grid_discrete_history,
+        metrics,
+    ) = jax.block_until_ready(compiled_run(rngs))
     print(f"Total time: {time.time() - t0}")
 
     metrics_path = save_path / "metrics.npz"
@@ -578,6 +596,10 @@ if __name__ == "__main__":
             np.save(
                 save_path / f"observation_counts_timestep_{actual_timestep}.npy",
                 obs_counts_history.observation_counts[:, idx],
+            )
+            np.save(
+                save_path / f"grid_discrete_timestep_{actual_timestep}.npy",
+                grid_discrete_history[:, idx],
             )
 
     print("Finished Run")

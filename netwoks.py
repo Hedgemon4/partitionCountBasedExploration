@@ -178,6 +178,7 @@ class QNetworkCounts(eqx.Module):
         return discrete_representation
 
     def get_discrete_representation(self, states):
+        x = states
         for i, block in enumerate(self.blocks):
             for layer in block:
                 x = layer(x)
@@ -186,7 +187,7 @@ class QNetworkCounts(eqx.Module):
                 discrete_activation = x
                 break
 
-        return self._discrete_representation(discrete_activation)
+        return self._discrete_representation(jax.lax.stop_gradient(discrete_activation))
 
     def loss(self, states, actions, targets):
         q_values, _ = jax.vmap(self)(states)
