@@ -13,7 +13,7 @@ class Args:
     """Plotting script to group and compare PQN runs based on config.yaml."""
 
     # The root directory to search for metrics.npz files
-    root_dir: Path = Path("data/pqn_mountaincar")
+    root_dir: Path = Path("data/local/cartpole_fta_testing")
 
     # The key in the .npz file to visualize
     metric: str = "extrinsic_return_ema"
@@ -22,7 +22,7 @@ class Args:
     smooth: int = 1
 
     # Directory to save the resulting plots
-    output_dir: Path = Path("graphs/pqn_mountaincar/")
+    output_dir: Path = Path("cartpole_fta_testing")
 
     # Config keys to group by. A separate plot will be generated for each combination.
     # Note: Use dot notation for nested yaml keys, e.g., 'network.hidden_size'

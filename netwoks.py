@@ -15,30 +15,37 @@ class QNetwork(eqx.Module):
         blocks = network_config.blocks
         keys = jax.random.split(key, len(blocks) + 1)
 
+        input_features = input_size
+        previous_bins = 1
         for i, block in enumerate(blocks):
             hidden_size = block.hidden_size
             learnable_norm_params = block.learnable_norm_params
 
-            # For the first block, input size is the environment's observation space, for the second block, input size is the hidden size of the previous block
-            in_features = input_size if i == 0 else blocks[i - 1].hidden_size
-
-            # For the last block, output size is the number of actions, for previous blocks, output size is the hidden size
-            out_features = hidden_size
+            # We need to flatten the output of the activation if there were multiple bins in the previous layer, since each bin will be treated as a separate feature for the next layer
+            if previous_bins > 1:
+                self.layers.append(eqx.nn.Lambda(jnp.ravel))
 
             self.layers.append(
                 eqx.nn.Linear(
-                    in_features=in_features, out_features=out_features, key=keys[i]
+                    in_features=input_features, out_features=hidden_size, key=keys[i]
                 )
             )
 
             self.layers.append(
                 eqx.nn.LayerNorm(
-                    out_features,
+                    hidden_size,
                     use_weight=learnable_norm_params,
                     use_bias=learnable_norm_params,
                 )
             )
-            self.layers.append(make_activation(block.activation))
+            activation = make_activation(block.activation)
+            num_bins = getattr(activation, "num_bins", 1)
+
+            self.layers.append(activation)
+
+            # Compute the number of input features for the next layer, which will be the hidden size times the number of bins for the current activation
+            input_features = hidden_size * num_bins
+            previous_bins = num_bins
 
         self.layers.append(
             eqx.nn.Linear(
