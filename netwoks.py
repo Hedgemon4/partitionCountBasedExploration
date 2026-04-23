@@ -16,30 +16,37 @@ class QNetwork(eqx.Module):
         blocks = network_config.blocks
         keys = jax.random.split(key, len(blocks) + 1)
 
+        input_features = input_size
+        previous_bins = 1
         for i, block in enumerate(blocks):
             hidden_size = block.hidden_size
             learnable_norm_params = block.learnable_norm_params
 
-            # For the first block, input size is the environment's observation space, for the second block, input size is the hidden size of the previous block
-            in_features = input_size if i == 0 else blocks[i - 1].hidden_size
-
-            # For the last block, output size is the number of actions, for previous blocks, output size is the hidden size
-            out_features = hidden_size
+            # We need to flatten the output of the activation if there were multiple bins in the previous layer, since each bin will be treated as a separate feature for the next layer
+            if previous_bins > 1:
+                self.layers.append(eqx.nn.Lambda(jnp.ravel))
 
             self.layers.append(
                 eqx.nn.Linear(
-                    in_features=in_features, out_features=out_features, key=keys[i]
+                    in_features=input_features, out_features=hidden_size, key=keys[i]
                 )
             )
 
             self.layers.append(
                 eqx.nn.LayerNorm(
-                    out_features,
+                    hidden_size,
                     use_weight=learnable_norm_params,
                     use_bias=learnable_norm_params,
                 )
             )
-            self.layers.append(make_activation(block.activation))
+            activation = make_activation(block.activation)
+            num_bins = getattr(activation, "num_bins", 1)
+
+            self.layers.append(activation)
+
+            # Compute the number of input features for the next layer, which will be the hidden size times the number of bins for the current activation
+            input_features = hidden_size * num_bins
+            previous_bins = num_bins
 
         self.layers.append(
             eqx.nn.Linear(
@@ -194,149 +201,3 @@ class QNetworkCounts(eqx.Module):
         index = jnp.arange(q_values.shape[0])
         selected_q_values = q_values[index, actions]
         return 0.5 * jnp.mean((selected_q_values - targets) ** 2), selected_q_values
-
-
-class QNetworkWithIntrinsicValueHead(eqx.Module):
-    block1: list
-    block2: list
-    extrinsic_value_head: list
-    intrinsic_value_head: list
-    counts: Array
-    count_layer: int
-    num_bins: int
-
-    def __init__(self, input_size, num_actions, key, network_config):
-        key1, key2, key3, key4 = jax.random.split(key, 4)
-
-        self.count_layer = network_config.count_layer
-
-        # Instantiate both activation layers
-        activation_layer_1 = make_activation(network_config.activation1)
-        activation_layer_2 = make_activation(network_config.activation2)
-
-        # Initialize Counts
-        num_bins_1 = getattr(activation_layer_1, "num_bins", 1)
-        num_bins_2 = getattr(activation_layer_2, "num_bins", 1)
-
-        if self.count_layer == 1:
-            self.num_bins = num_bins_1
-        elif self.count_layer == 2:
-            self.num_bins = num_bins_2
-        else:
-            raise ValueError(
-                "Count layer must be either 1 or 2, indicating which activation layer to use for the discrete representation"
-            )
-
-        if self.num_bins < 2:
-            raise ValueError(
-                "Count layer must have at least two bins to have a discrete representation"
-            )
-
-        hidden_size = network_config.hidden_size
-        learnable_norm_params = network_config.learnable_norm_params
-
-        self.counts = jnp.ones((num_actions, hidden_size, self.num_bins))
-
-        # Determine the width of the second linear layer's input.
-        second_linear_width = num_bins_1 * hidden_size
-        final_linear_width = num_bins_2 * hidden_size
-
-        self.block1 = [
-            eqx.nn.Linear(in_features=input_size, out_features=hidden_size, key=key1),
-            eqx.nn.LayerNorm(
-                hidden_size,
-                use_weight=learnable_norm_params,
-                use_bias=learnable_norm_params,
-            ),
-            activation_layer_1,
-        ]
-        self.block2 = [
-            eqx.nn.Lambda(jnp.ravel),
-            eqx.nn.Linear(
-                in_features=second_linear_width,
-                out_features=hidden_size,
-                key=key2,
-            ),
-            eqx.nn.LayerNorm(
-                hidden_size,
-                use_weight=learnable_norm_params,
-                use_bias=learnable_norm_params,
-            ),
-            activation_layer_2,
-        ]
-        self.extrinsic_value_head = [
-            eqx.nn.Lambda(jnp.ravel),
-            eqx.nn.Linear(
-                in_features=final_linear_width, out_features=num_actions, key=key3
-            ),
-        ]
-        self.intrinsic_value_head = [
-            eqx.nn.Lambda(jnp.ravel),
-            eqx.nn.Linear(
-                in_features=final_linear_width, out_features=num_actions, key=key4
-            ),
-        ]
-
-    def update_counts(self, discrete_states, actions):
-        updated_counts = self.counts.at[actions].add(discrete_states)
-        return eqx.tree_at(lambda m: m.counts, self, updated_counts)
-
-    def get_intrinsic_reward(self, discrete_state, action):
-        counts = self.counts * discrete_state
-        counts = jnp.sum(counts, axis=-1)
-        counts = jnp.min(counts, axis=-1)
-        reward = jnp.sqrt(2 * jnp.log(jnp.sum(counts, axis=-1)) / counts[action])
-        return reward
-
-    def __call__(self, x):
-        # Explicitly indicate counts are not trainable
-        jax.lax.stop_gradient(self.counts)
-
-        for layer in self.block1:
-            x = layer(x)
-
-        first_activation = x
-
-        for layer in self.block2:
-            x = layer(x)
-
-        second_activation = x
-
-        for layer in self.extrinsic_value_head:
-            extrinsic_output = layer(x)
-
-        for layer in self.intrinsic_value_head:
-            intrinsic_output = layer(x)
-
-        # Depending on which layer is being used for counts, select the appropriate activation for the discrete representation
-        discrete_activation = (
-            first_activation if self.count_layer == 1 else second_activation
-        )
-
-        # If the left linear tile is active, then it will be negative so won't be chosen by argmax, but should be used as the one hot
-        left_linear_active = discrete_activation[:, 0] < 0.0
-        argmax = jnp.argmax(discrete_activation, axis=-1)
-        # Either the left linear tile if active, or the argmax of the rest of the tiles
-        final_indices = jnp.where(left_linear_active, 0, argmax)
-        discrete_representation = one_hot(final_indices, discrete_activation.shape[-1])
-
-        return extrinsic_output, intrinsic_output, discrete_representation
-
-    def loss(self, states, actions, extrinsic_targets, intrinsic_targets):
-        extrinsic_q_values, intrinsic_q_values, _ = jax.vmap(self)(states)
-
-        # Compute extrinsic loss
-        index = jnp.arange(extrinsic_q_values.shape[0])
-        selected_q_values = extrinsic_q_values[index, actions]
-        extrinsic_loss = 0.5 * jnp.mean((selected_q_values - extrinsic_targets) ** 2)
-
-        # Compute intrinsic loss
-        index = jnp.arange(intrinsic_q_values.shape[0])
-        selected_intrinsic_q_values = intrinsic_q_values[index, actions]
-        intrinsic_loss = 0.5 * jnp.mean(
-            (selected_intrinsic_q_values - intrinsic_targets) ** 2
-        )
-
-        total_loss = extrinsic_loss + intrinsic_loss
-
-        return total_loss, selected_q_values
