@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --account=rrg-mbowling-ad
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=16000M
+#SBATCH --mem=32000M
 #SBATCH --time=02:59:00
 #SBATCH --mail-user=slakins@ualberta.ca
 #SBATCH --mail-type=ALL
