@@ -16,7 +16,7 @@ for beta in "${betas[@]}"; do
         for final_epsilon in "${final_epsilons[@]}"; do
             for decay in "${epsilon_decay[@]}"; do
                 for max_norm in "${max_grad_norm[@]}"; do
-                    echo "--beta $beta --pessimistic  --epsilon-end $final_epsilon --epsilon-decay $decay --max-grad-norm $max_norm --initial_learning_rate $rate --final_learning_rate $rate network:q-network-counts --network.blocks.0.$norm --output-folder-name mountaincar_pessimistic_larger_epsilon_sweep/run_$counter" >>"$output_file"
+                    echo "--beta $beta --pessimistic  --epsilon-end $final_epsilon --epsilon-decay $decay --max-grad-norm $max_norm --initial_learning_rate $rate --final_learning_rate $rate network:q-network-counts --output-folder-name mountaincar_pessimistic_larger_epsilon_sweep/run_$counter" >>"$output_file"
                     ((counter++))
                 done
             done
