@@ -146,6 +146,7 @@ def plot_histogram_with_actions(
     ax: Optional[plt.Axes] = None,
     show_legend: bool = True,
     show_outlier_box: bool = True,
+    compact: bool = False,
 ) -> Tuple[plt.Axes, List[dict], dict]:
     """Plot a histogram of bin usage, with bars stacked by action.
 
@@ -203,22 +204,27 @@ def plot_histogram_with_actions(
         zorder=5,
     )
 
-    # Per-seed dots (totals)
-    rng = np.random.default_rng(0)
-    jitter = rng.uniform(-0.18, 0.18, size=per_seed.shape[0])
-    for seed_idx in range(per_seed.shape[0]):
-        ax.scatter(
-            bins + jitter[seed_idx],
-            per_seed[seed_idx],
-            s=8,
-            color="black",
-            alpha=0.28,
-            zorder=6,
-        )
+    # Per-seed dots (totals) — skipped in compact mode (too cluttered at small size)
+    if not compact:
+        rng = np.random.default_rng(0)
+        jitter = rng.uniform(-0.18, 0.18, size=per_seed.shape[0])
+        for seed_idx in range(per_seed.shape[0]):
+            ax.scatter(
+                bins + jitter[seed_idx],
+                per_seed[seed_idx],
+                s=8,
+                color="black",
+                alpha=0.28,
+                zorder=6,
+            )
 
-    # Percentage labels above each bar
+    # Percentage labels above each bar. In compact mode we rotate them 90°
+    # so they don't collide across the narrow middle bins.
     total = per_bin_mean.sum()
     ymax = (per_bin_mean + per_bin_std).max()
+    label_rotation = 90 if compact else 0
+    label_va = "bottom"
+    label_fontsize = 7 if compact else 8
     for i, (m, s) in enumerate(zip(per_bin_mean, per_bin_std)):
         pct = 100.0 * m / total if total > 0 else 0.0
         ax.text(
@@ -226,9 +232,10 @@ def plot_histogram_with_actions(
             m + s + 0.02 * ymax,
             f"{pct:.1f}%",
             ha="center",
-            va="bottom",
-            fontsize=8,
+            va=label_va,
+            fontsize=label_fontsize,
             fontweight="bold",
+            rotation=label_rotation,
         )
 
     ax.set_xlabel("FTA Bin Index")
@@ -236,7 +243,8 @@ def plot_histogram_with_actions(
     ax.set_title(title, fontsize=10)
     ax.set_xticks(bins)
     ax.grid(axis="y", linestyle="--", alpha=0.6)
-    ax.margins(y=0.20)
+    # Rotated percentage labels need more headroom than the default 20%.
+    ax.margins(y=0.30 if compact else 0.20)
     if show_legend:
         ax.legend(loc="upper center", fontsize=8, ncol=n_actions, frameon=True)
 

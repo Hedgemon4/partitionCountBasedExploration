@@ -36,15 +36,15 @@ _TIMESTEP_RE = re.compile(r"_timestep_(\d+)\.npy$")
 class Args:
     """Analyze and plot specific runs from a large hyperparameter sweep."""
 
-    root_dir: Path = Path("data/mountaincar_pqn_baseline_sweep")
+    root_dir: Path = Path("data/mountaincar_pessimistic_sweep")
     metric: str = "extrinsic_return_ema"
-    intrinsic_metric: str = None
+    intrinsic_metric: str = "intrinsic_return_ema"
     top_k: int = 10
     smooth: int = 1
-    output_dir: Path = Path("graphs/mountaincar_pqn_baseline_sweep/top_10/auc/")
+    output_dir: Path = Path("graphs/mountaincar_pessimistic_sweep/top_10/last_1pct/")
 
     # --- SCORING PARAMETERS ---
-    score_metric: str = "auc"
+    score_metric: str = "last_10pct"
     """How to rank runs for top-k selection. Options:
       last_10pct  - mean over the final 10%% of timesteps (original behaviour)
       auc         - area under the curve (trapezoidal, normalised by x-range)
@@ -182,9 +182,12 @@ def get_config_value(config: dict, key_path: str) -> Any:
     val = config
     try:
         for part in key_path.split("."):
-            val = val.get(part)
+            if isinstance(val, list):
+                val = val[int(part)]
+            else:
+                val = val.get(part)
         return val
-    except (AttributeError, TypeError):
+    except (AttributeError, TypeError, KeyError, IndexError, ValueError):
         return None
 
 
@@ -537,31 +540,66 @@ def _plot_fta_evolution(
                         per-seed bin total, summed over neurons and actions.
     """
     T = counts_hist.shape[0]
-    ncols = T
-    fig_h = 5
-    fig_w = max(5, 3.2 * ncols)
-
     # --- (a) Grid of per-timestep histograms -----------------------------
-    fig, axes = plt.subplots(1, ncols, figsize=(fig_w, fig_h), sharey=True, squeeze=False)
+    # Wrap the timesteps into a roughly-square 2D grid so each subplot is
+    # wide enough for its percentage labels and stacked bars to be legible.
+    ncols = int(np.ceil(np.sqrt(T)))
+    nrows = int(np.ceil(T / ncols))
+    subplot_w, subplot_h = 4.0, 3.6
+    fig_w = subplot_w * ncols
+    fig_h = subplot_h * nrows + 0.8  # extra room for suptitle + legend
+
+    fig, axes = plt.subplots(
+        nrows, ncols, figsize=(fig_w, fig_h), sharey=True, squeeze=False
+    )
+    legend_handles = None
+    legend_labels = None
     for i, t in enumerate(timesteps):
-        ax = axes[0][i]
+        r, c = divmod(i, ncols)
+        ax = axes[r][c]
         plot_histogram_with_actions(
             counts_hist[i],
             title=f"t = {_fmt_step(t)}",
             out_path=out_dir,  # unused — ax provided
             highlight=(rank == 1 and i == T - 1),
             ax=ax,
-            show_legend=(i == 0),
+            show_legend=False,  # single shared legend below
             show_outlier_box=False,
+            compact=True,
         )
-        if i != 0:
+        if legend_handles is None:
+            legend_handles, legend_labels = ax.get_legend_handles_labels()
+        # Only label y-axis on the leftmost subplot of each row.
+        if c != 0:
             ax.set_ylabel("")
+        # Only label x-axis on the bottom row of the grid to save space.
+        if r != nrows - 1:
+            ax.set_xlabel("")
+
+    # Hide any leftover empty axes (e.g., T=7 in a 3x3 grid).
+    for j in range(T, nrows * ncols):
+        r, c = divmod(j, ncols)
+        axes[r][c].set_visible(False)
+
+    # Figure-level legend above the grid.
+    if legend_handles:
+        fig.legend(
+            legend_handles,
+            legend_labels,
+            loc="upper center",
+            ncol=len(legend_labels),
+            fontsize=9,
+            frameon=True,
+            bbox_to_anchor=(0.5, 0.965),
+        )
+
     fig.suptitle(
         f"FTA bin usage over training  |  Rank {rank}  |  {res['folder'].name}  "
         f"(score={res['score']:.2f})",
-        fontsize=12,
+        fontsize=13,
+        y=0.995,
     )
-    fig.tight_layout(rect=[0, 0, 1, 0.93])
+    fig.tight_layout(rect=[0, 0, 1, 0.92])
     out_path = out_dir / f"fta_hist_grid_rank_{rank:02d}_{res['folder'].name}.png"
     fig.savefig(out_path, dpi=180, bbox_inches="tight")
     plt.close(fig)
