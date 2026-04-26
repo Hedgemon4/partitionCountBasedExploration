@@ -36,12 +36,12 @@ _TIMESTEP_RE = re.compile(r"_timestep_(\d+)\.npy$")
 class Args:
     """Analyze and plot specific runs from a large hyperparameter sweep."""
 
-    root_dir: Path = Path("data/mountaincar_pessimistic_sweep")
+    root_dir: Path = Path("data/mountaincar_bounds_sweep")
     metric: str = "extrinsic_return_ema"
     intrinsic_metric: str = "intrinsic_return_ema"
     top_k: int = 10
     smooth: int = 1
-    output_dir: Path = Path("graphs/mountaincar_pessimistic_sweep/top_10/last_1pct/")
+    output_dir: Path = Path("graphs/mountaincar_bounds_sweep/top_10/last_1pct/")
 
     # --- SCORING PARAMETERS ---
     score_metric: str = "last_10pct"
