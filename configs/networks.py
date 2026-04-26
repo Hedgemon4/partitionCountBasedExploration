@@ -44,16 +44,10 @@ class QNetworkCounts(BaseNetworkConfig):
     )
 
 
-@dataclasses.dataclass(frozen=True)
-class QNetworkDoorKeyCounts(BaseNetworkConfig):
-    type: Literal["q_network_counts"] = "q_network_counts"
-    hidden_size: int = 128
-    learnable_norm_params: bool = False
-    count_layer: int = 1
 
-    # Network Activation Configs
-    activation1: ActivationConfig = FTA()
-    activation2: ActivationConfig = Relu()
-
-
-NetworkConfig = Union[QNetwork, QNetworkCartpole, QNetworkCounts, BaseNetworkConfig]
+NetworkConfig = Union[
+    QNetwork,
+    QNetworkCartpole,
+    QNetworkCounts,
+    BaseNetworkConfig,
+    ]

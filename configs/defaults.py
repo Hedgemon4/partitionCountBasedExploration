@@ -6,9 +6,8 @@ from configs.activations import FTA, Relu
 from configs.networks import (
     QNetworkCounts,
     NetworkConfig,
-    QNetworkMountainCarCounts,
-    QNetworkDoorKeyCounts,
     QNetwork,
+    QNetworkCartpole,
 )
 
 
@@ -274,4 +273,7 @@ class DoorKeyWithIntrinsicRewardsConfig(BaseConfig):
     epsilon_decay: float = 0.3
 
     # Network Activation Configs
-    network: NetworkConfig = QNetworkDoorKeyCounts()
+    network: NetworkConfig = QNetworkCounts()
+
+    # Env timesteps between each count snapshot (0 = save only at end of training)
+    count_save_timestep_interval: float = 5e4
