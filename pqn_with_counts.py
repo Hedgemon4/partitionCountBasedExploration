@@ -19,8 +19,13 @@ import configs.defaults as configs
 from exploration import epsilon_greedy
 from helper_functions import update_ema
 from netwoks import QNetworkCounts
-from wrappers import FlattenObservationWrapper, LogWrapper, NavixGymnaxWrapper, NavixFlattenObservationWrapper
-from wrappers import PessimisticMountainCarWrapper
+from wrappers import (
+    FlattenObservationWrapper,
+    LogWrapper,
+    PessimisticMountainCarWrapper,
+    NavixGymnaxWrapper,
+    NavixFlattenObservationWrapper,
+)
 
 """
 PQN implementation based on https://github.com/mttga/purejaxql/blob/main/purejaxql/pqn_gymnax.py
@@ -65,6 +70,7 @@ def make_env(args, episode_length):
         # navix environments use a Timestep-based API; NavixGymnaxWrapper adapts
         # them to the same (reset/step) interface as gymnax.
         import navix
+
         navix_env = navix.make(environment_name, observation_fn=observations.symbolic)
         navix_env = NavixFlattenObservationWrapper(navix_env)
         env = NavixGymnaxWrapper(navix_env)
@@ -74,7 +80,7 @@ def make_env(args, episode_length):
         if episode_length is not None:
             env_params = env_params.replace(max_steps_in_episode=episode_length)
         env = FlattenObservationWrapper(env)
-        
+
     if environment_name == "MountainCar-v0" and args.pessimistic:
         print("Using pessimistic wrapper for MountainCar")
         env = PessimisticMountainCarWrapper(env)

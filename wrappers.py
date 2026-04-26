@@ -11,6 +11,7 @@ from navix import Environment
 
 try:
     import navix as _navix  # noqa: F401
+
     _NAVIX_AVAILABLE = True
 except ImportError:
     _NAVIX_AVAILABLE = False
@@ -25,7 +26,6 @@ class GymnaxWrapper(object):
     # provide proxy access to regular attributes of wrapped object
     def __getattr__(self, name):
         return getattr(self._env, name)
-
 
 
 def NavixFlattenObservationWrapper(env: Environment):
@@ -137,7 +137,6 @@ class LogWrapper(GymnaxWrapper):
         return obs, state, reward, done, info
 
 
-
 class NavixGymnaxWrapper:
     def __init__(self, navix_env):
         self._env = navix_env
@@ -162,7 +161,8 @@ class NavixGymnaxWrapper:
         return spaces.Discrete(
             num_categories=self._env.action_space.maximum.item() + 1,
         )
-    
+
+
 class PessimisticMountainCarWrapper(GymnaxWrapper):
     def __init__(self, env: environment.Environment):
         super().__init__(env)
@@ -181,5 +181,3 @@ class PessimisticMountainCarWrapper(GymnaxWrapper):
         )
         reward = jnp.where(goal_reached, 1.0, 0.0)
         return obs, state, reward, done, info
-
-    

@@ -10,38 +10,38 @@ class BaseNetworkConfig:
 
 
 @dataclasses.dataclass(frozen=True)
+class Block:
+    hidden_size: int = 64
+    learnable_norm_params: bool = True
+    activation: ActivationConfig = Relu()
+
+
+@dataclasses.dataclass(frozen=True)
+class FTABlock(Block):
+    activation: ActivationConfig = FTA()
+
+
+@dataclasses.dataclass(frozen=True)
 class QNetwork(BaseNetworkConfig):
     type: Literal["q_network"] = "q_network"
-    hidden_size: int = 256
-    learnable_norm_params: bool = True
+    blocks: list[Block] = dataclasses.field(default_factory=lambda: [Block(), Block()])
 
-    # Network Activation Configs
-    activation1: ActivationConfig = Relu()
-    activation2: ActivationConfig = Relu()
+
+@dataclasses.dataclass(frozen=True)
+class QNetworkCartpole(BaseNetworkConfig):
+    type: Literal["q_network"] = "q_network"
+    blocks: list[Block] = dataclasses.field(
+        default_factory=lambda: [Block(hidden_size=256), Block(hidden_size=256)]
+    )
 
 
 @dataclasses.dataclass(frozen=True)
 class QNetworkCounts(BaseNetworkConfig):
     type: Literal["q_network_counts"] = "q_network_counts"
-    hidden_size: int = 64
-    learnable_norm_params: bool = False
     count_layer: int = 1
-
-    # Network Activation Configs
-    activation1: ActivationConfig = FTA()
-    activation2: ActivationConfig = Relu()
-
-
-@dataclasses.dataclass(frozen=True)
-class QNetworkMountainCarCounts(BaseNetworkConfig):
-    type: Literal["q_network_counts"] = "q_network_counts"
-    hidden_size: int = 64
-    learnable_norm_params: bool = True
-    count_layer: int = 1
-
-    # Network Activation Configs
-    activation1: ActivationConfig = FTA()
-    activation2: ActivationConfig = Relu()
+    blocks: list[Block] = dataclasses.field(
+        default_factory=lambda: [FTABlock(), Block()]
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -56,6 +56,4 @@ class QNetworkDoorKeyCounts(BaseNetworkConfig):
     activation2: ActivationConfig = Relu()
 
 
-NetworkConfig = Union[
-    QNetwork, QNetworkCounts, QNetworkMountainCarCounts, QNetworkDoorKeyCounts, BaseNetworkConfig
-]
+NetworkConfig = Union[QNetwork, QNetworkCartpole, QNetworkCounts, BaseNetworkConfig]

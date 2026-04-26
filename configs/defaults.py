@@ -76,7 +76,7 @@ class PQNCartpoleConfig(BaseConfig):
     epsilon_decay: float = 0.2
 
     # Network Activation Configs
-    network: NetworkConfig = QNetwork()
+    network: NetworkConfig = QNetworkCartpole()
 
 
 @chex.dataclass(frozen=True)
@@ -200,7 +200,7 @@ class CartPoleWithIntrinsicRewardsConfig(BaseConfig):
     total_time_steps: float = 5e5
 
     # Exploration Configs
-    beta: float = 0.1
+    beta: float = 0.5
     epsilon_start: float = 1.0
     epsilon_end: float = 0.2
     epsilon_decay: float = 0.2
@@ -235,13 +235,13 @@ class MountainCarWithIntrinsicRewardsConfig(BaseConfig):
     total_time_steps: float = 5e5
 
     # Exploration Configs
-    beta: float = 0.1
+    beta: float = 0.5
     epsilon_start: float = 1.0
     epsilon_end: float = 0.01
     epsilon_decay: float = 0.2
 
     # Network Activation Configs
-    network: NetworkConfig = QNetworkMountainCarCounts()
+    network: NetworkConfig = QNetworkCounts()
 
 
 @chex.dataclass(frozen=True)
