@@ -322,6 +322,10 @@ def main(args: Args):
     #    `grid_counts/` subdirs contributes its own set of figures.
     _plot_snapshot_evolution(top_results, args)
 
+    # 7. Goal-reach plot — for MountainCar-style envs, count visits to the
+    #    goal region (position bins at or above goal_position) per top-k run.
+    _plot_goal_reach_counts(top_results, args)
+
 
 def _plot_count_histograms(top_results, args: Args):
     """For each top-k run, produce a bin-usage histogram in the same format
@@ -368,7 +372,11 @@ def _plot_count_histograms(top_results, args: Args):
         )
         out = hist_dir / f"hist_rank_{rank:02d}_{folder.name}.png"
         _, outliers, _ = plot_histogram_with_actions(
-            counts, title=title, out_path=out, highlight=(rank == 1)
+            counts,
+            title=title,
+            out_path=out,
+            highlight=(rank == 1),
+            show_outlier_box=False,
         )
         outlier_report_lines.append(
             f"Rank {rank} | {folder.name} | score={res['score']:.2f} | "
@@ -400,7 +408,7 @@ def _plot_count_histograms(top_results, args: Args):
             highlight=(rank == 1),
             ax=ax,
             show_legend=(idx == 0),
-            show_outlier_box=True,
+            show_outlier_box=False,
         )
         if c != 0:
             ax.set_ylabel("")
@@ -715,6 +723,13 @@ def _plot_obs_counts_evolution(
     fig2, axes2 = plt.subplots(
         A, T, figsize=(fig_w, 3.2 * A), squeeze=False, sharex=True, sharey=True
     )
+    # IMPORTANT: reserve gutter space *before* creating colorbars. Calling
+    # `subplots_adjust` after `fig.colorbar` (or invoking colorbar with the
+    # full row of axes via `ax=axes2[a].tolist()`) caused matplotlib to
+    # rebuild the gridspec per row and place one of the per-row colorbars on
+    # the seam *between* the second-to-last and last subplot — showing up as
+    # a thin vertical bright streak inside the t≈399k panel.
+    fig2.subplots_adjust(top=0.90, bottom=0.08, right=0.93)
     # Shared colour scale per action (each row) so the action-specific
     # distribution is visible even when one action dominates the counts.
     for a in range(A):
@@ -737,11 +752,14 @@ def _plot_obs_counts_evolution(
                 ax.set_ylabel(f"action {a}\n{ylabel}")
             if a == A - 1:
                 ax.set_xlabel(xlabel)
-        # Per-row colorbar
+        # Per-row colorbar — anchor to the rightmost subplot only so
+        # matplotlib doesn't try to insert a colorbar column into the row's
+        # gridspec.
         fig2.colorbar(
             im,
-            ax=axes2[a].tolist(),
+            ax=axes2[a, -1],
             shrink=0.85,
+            pad=0.02,
             label=f"action {a}: mean visits per seed",
         )
 
@@ -751,7 +769,6 @@ def _plot_obs_counts_evolution(
         "(colour scale shared within each action row, averaged across seeds)",
         fontsize=11,
     )
-    fig2.subplots_adjust(top=0.90, bottom=0.08)
     out_path2 = out_dir / f"obs_visitation_per_action_rank_{rank:02d}_{res['folder'].name}.png"
     fig2.savefig(out_path2, dpi=180, bbox_inches="tight")
     plt.close(fig2)
@@ -1104,6 +1121,179 @@ def _plot_snapshot_evolution(top_results, args: Args) -> None:
 
     if not any_plotted:
         print("[evo] no top-k runs had snapshot directories; skipping evolution plots")
+
+
+# ---------------------------------------------------------------------------
+# Goal-reach counts (MountainCar-style envs)
+# ---------------------------------------------------------------------------
+
+# Goal position used by Gymnasium MountainCar-v0. Exposed at module scope so
+# downstream callers (or future envs) can override if needed.
+MOUNTAINCAR_GOAL_POSITION = 0.5
+
+
+def _goal_reach_per_seed(
+    obs_hist: np.ndarray,
+    folder: Path,
+    goal_position: float = MOUNTAINCAR_GOAL_POSITION,
+) -> Optional[np.ndarray]:
+    """Sum observation counts in position bins at or above `goal_position`.
+
+    Parameters
+    ----------
+    obs_hist : (T, S, A, B0, B1) cumulative observation counts.
+        B0 indexes the position dim, B1 the velocity dim — matching the
+        binning used by ObservationCounts.update_counts (one indexer per obs
+        dim, in obs-vector order, which for MountainCar is [position,
+        velocity]).
+    folder : run folder, used to read the obs-space bounds from config.
+    goal_position : position threshold (inclusive) defining "reached the goal".
+
+    Returns
+    -------
+    np.ndarray of shape (T, S) giving the cumulative goal-region visit count
+    per (snapshot, seed), summed over actions, velocity bins, and qualifying
+    position bins. Returns None if the obs-space bounds can't be determined
+    or if `obs_hist` doesn't have the expected 5D layout.
+    """
+    if obs_hist is None or obs_hist.ndim != 5:
+        return None
+    low, high, _ = _load_obs_space_bounds(folder)
+    if low is None or high is None or len(low) < 1:
+        return None
+
+    T, S, A, B0, B1 = obs_hist.shape
+    pos_low, pos_high = float(low[0]), float(high[0])
+    if pos_high <= pos_low:
+        return None
+
+    # Replicate ObservationCounts.update_counts binning so we know which bin
+    # indexes correspond to position >= goal_position. The bin holding
+    # `goal_position` is the lowest bin we count (it spans [pos_low + bw*k,
+    # pos_low + bw*(k+1))) — values at and above the threshold all land in
+    # bin k or higher).
+    bin_width = (pos_high - pos_low) / B0
+    if bin_width <= 0:
+        return None
+    goal_bin_lo = int(np.floor((goal_position - pos_low) / bin_width))
+    goal_bin_lo = max(0, min(B0 - 1, goal_bin_lo))
+
+    # Sum over actions (axis=2), velocity (axis=4), and position bins >=
+    # goal_bin_lo (axis=3).
+    summed = obs_hist[:, :, :, goal_bin_lo:, :].sum(axis=(2, 3, 4))  # (T, S)
+    return summed
+
+
+def _plot_goal_reach_counts(top_results, args: Args) -> None:
+    """For each top-k run, plot cumulative goal-region visits over training.
+
+    Counts each visit to a position bin at or above MOUNTAINCAR_GOAL_POSITION
+    (summed over actions and velocity bins). Two figures are written:
+      * goal_reach_curves.png  – mean ± SEM curve per run (snapshot-level)
+      * goal_reach_final.png   – bar chart of the final-snapshot mean per run
+                                 with per-seed dots and SEM error bars
+
+    Runs whose env doesn't have a recognised observation-space bound (e.g.
+    non-MountainCar) or that lack `observation_counts` snapshots are skipped.
+    """
+    out_dir = args.output_dir / "goal_reach"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    series: List[Dict[str, Any]] = []
+    for rank, res in enumerate(top_results, start=1):
+        folder: Path = res["folder"]
+        snaps = _load_snapshot_history(folder)
+        timesteps = snaps["timesteps"]
+        obs_hist = snaps["observation_counts"]
+        if not timesteps or obs_hist is None:
+            continue
+        per_seed = _goal_reach_per_seed(obs_hist, folder)
+        if per_seed is None:
+            continue
+        series.append(
+            {
+                "rank": rank,
+                "name": res["name"],
+                "folder_name": folder.name,
+                "score": res["score"],
+                "timesteps": np.asarray(timesteps),
+                "per_seed": per_seed,            # (T, S)
+            }
+        )
+
+    if not series:
+        print("[goal] no top-k runs had observation_counts snapshots; skipping goal-reach plot")
+        return
+
+    cmap = plt.cm.get_cmap("tab10", max(10, len(series)))
+
+    # --- (a) Curves over training ----------------------------------------
+    fig, ax = plt.subplots(figsize=(10, 6))
+    for i, s in enumerate(series):
+        per_seed = s["per_seed"]                    # (T, S)
+        mean = per_seed.mean(axis=1)
+        sem = per_seed.std(axis=1, ddof=1) / np.sqrt(per_seed.shape[1])
+        label = (
+            f"Rank {s['rank']} | {s['folder_name']} "
+            f"(score={s['score']:.2f})"
+        )
+        ax.plot(s["timesteps"], mean, marker="o", color=cmap(i), label=label,
+                linewidth=2)
+        ax.fill_between(s["timesteps"], mean - sem, mean + sem,
+                        color=cmap(i), alpha=0.15)
+    ax.set_xlabel("Environment Steps")
+    ax.set_ylabel(
+        f"Cumulative goal-region visits per seed\n"
+        f"(position ≥ {MOUNTAINCAR_GOAL_POSITION})"
+    )
+    ax.set_title(
+        f"Goal-reach counts over training (Top {len(series)} by {args.score_metric})"
+    )
+    ax.grid(True, linestyle="--", alpha=0.6)
+    ax.legend(fontsize=8, loc="best", frameon=True)
+    fig.tight_layout()
+    out_curves = out_dir / "goal_reach_curves.png"
+    fig.savefig(out_curves, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  saved {out_curves}")
+
+    # --- (b) Bar of final-snapshot mean ----------------------------------
+    fig2, ax2 = plt.subplots(figsize=(max(6, 0.9 * len(series) + 3), 5))
+    xs = np.arange(len(series))
+    finals = np.array([s["per_seed"][-1] for s in series])  # (n_runs, S)
+    means = finals.mean(axis=1)
+    sems = finals.std(axis=1, ddof=1) / np.sqrt(finals.shape[1])
+    bar_colors = [cmap(i) for i in range(len(series))]
+    ax2.bar(xs, means, yerr=sems, capsize=4, color=bar_colors,
+            edgecolor="black", linewidth=0.8, alpha=0.9)
+    # Per-seed dots (jittered) on top of each bar so individual seed
+    # behaviour is visible — some seeds may reach the goal many times while
+    # others never do.
+    rng = np.random.default_rng(0)
+    for i, s in enumerate(series):
+        seeds_final = s["per_seed"][-1]
+        jitter = rng.uniform(-0.18, 0.18, size=seeds_final.shape[0])
+        ax2.scatter(np.full_like(seeds_final, i, dtype=float) + jitter,
+                    seeds_final, s=14, color="black", alpha=0.5,
+                    edgecolors="white", linewidths=0.4, zorder=3)
+    ax2.set_xticks(xs)
+    ax2.set_xticklabels(
+        [f"Rank {s['rank']}\n{s['folder_name']}" for s in series],
+        rotation=30, ha="right", fontsize=8,
+    )
+    ax2.set_ylabel(
+        f"Final cumulative goal-region visits per seed\n"
+        f"(position ≥ {MOUNTAINCAR_GOAL_POSITION})"
+    )
+    ax2.set_title(
+        f"Final goal-reach counts (Top {len(series)} by {args.score_metric})"
+    )
+    ax2.grid(True, axis="y", linestyle="--", alpha=0.6)
+    fig2.tight_layout()
+    out_final = out_dir / "goal_reach_final.png"
+    fig2.savefig(out_final, dpi=200, bbox_inches="tight")
+    plt.close(fig2)
+    print(f"  saved {out_final}")
 
 
 if __name__ == "__main__":
