@@ -204,6 +204,9 @@ class CartPoleWithIntrinsicRewardsConfig(BaseConfig):
     epsilon_end: float = 0.2
     epsilon_decay: float = 0.2
 
+    # Env timesteps between each count snapshot (0 = save only at end of training)
+    count_save_timestep_interval: float = 5e4
+
     # Network Activation Configs
     network: NetworkConfig = QNetworkCounts()
 
@@ -214,8 +217,8 @@ class MountainCarWithIntrinsicRewardsConfig(BaseConfig):
     output_folder_name: str = "pqn_same_epsilon_testing"
 
     # Algorithm Configs
-    initial_learning_rate: float = 0.004
-    final_learning_rate: float = 0.004
+    initial_learning_rate: float = 0.001
+    final_learning_rate: float = 0.001
     num_epochs: int = 8
     num_minibatches: int = 16
     gamma: float = 0.99
@@ -237,7 +240,10 @@ class MountainCarWithIntrinsicRewardsConfig(BaseConfig):
     beta: float = 0.5
     epsilon_start: float = 1.0
     epsilon_end: float = 0.01
-    epsilon_decay: float = 0.2
+    epsilon_decay: float = 0.05
+
+    # Env timesteps between each count snapshot (0 = save only at end of training)
+    count_save_timestep_interval: float = 5e4
 
     # Network Activation Configs
     network: NetworkConfig = QNetworkCounts()

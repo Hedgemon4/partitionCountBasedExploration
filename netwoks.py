@@ -9,6 +9,7 @@ from activations import make_activation
 
 class QNetwork(eqx.Module):
     layers: list
+    num_bins: int = 10
 
     def __init__(self, input_size, num_actions, key, network_config):
         self.layers = []
@@ -72,6 +73,7 @@ class QNetworkCounts(eqx.Module):
     value_head: list
     counts: Array
     count_layer: int
+    num_bins: int
 
     def __init__(self, input_size, num_actions, key, network_config):
         self.blocks = []
@@ -110,6 +112,7 @@ class QNetworkCounts(eqx.Module):
             if self.count_layer == i + 1:
                 # This will be the layer which outputs the discrete representation, so we need to get the bin size
                 number_of_discrete_states = num_bins
+                self.num_bins = num_bins
                 if number_of_discrete_states < 2:
                     raise ValueError(
                         "Count layer must have at least two bins to have a discrete representation"
@@ -182,6 +185,7 @@ class QNetworkCounts(eqx.Module):
         return discrete_representation
 
     def get_discrete_representation(self, states):
+        x = states
         for i, block in enumerate(self.blocks):
             for layer in block:
                 x = layer(x)
@@ -190,7 +194,7 @@ class QNetworkCounts(eqx.Module):
                 discrete_activation = x
                 break
 
-        return self._discrete_representation(discrete_activation)
+        return self._discrete_representation(jax.lax.stop_gradient(discrete_activation))
 
     def loss(self, states, actions, targets):
         q_values, _ = jax.vmap(self)(states)

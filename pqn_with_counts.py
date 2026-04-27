@@ -19,6 +19,7 @@ import configs.defaults as configs
 from exploration import epsilon_greedy
 from helper_functions import update_ema
 from netwoks import QNetworkCounts
+from observations_counting import ObservationCounts
 from wrappers import (
     FlattenObservationWrapper,
     LogWrapper,
@@ -174,6 +175,14 @@ def make_run(args):
             episode_length_ema=jnp.nan,
         )
 
+        # Get the distribution of states and actions if we just had a num_bins by num_bins grid
+        observation_counts = ObservationCounts.create(
+            num_bins=initial_model.num_bins,
+            low=env.observation_space(env_params).low,
+            high=env.observation_space(env_params).high,
+            num_actions=num_actions,
+        )
+
         step_number = 0
         env_step = 0
 
@@ -189,6 +198,7 @@ def make_run(args):
                 carry_params,
                 carry_opt_state,
                 train_episode_metrics,
+                carry_observation_counts,
             ) = carry
             epsilon = epsilon_schedule(step_number)
             model = eqx.combine(carry_params, static)
@@ -273,11 +283,18 @@ def make_run(args):
             env_step += args.num_steps * args.num_environments
 
             transitions, infos = intermediate_values
-            flat_states = transitions.discrete_state.reshape(
+            flat_discrete_state = transitions.discrete_state.reshape(
                 -1, *transitions.discrete_state.shape[-2:]
             )
+            flat_discrete_actions = transitions.action.reshape(-1)
+            model = model.update_counts(flat_discrete_state, flat_discrete_actions)
+
+            # Update Observation counts
+            flat_states = transitions.state.reshape(-1, transitions.state.shape[-1])
             flat_actions = transitions.action.reshape(-1)
-            model = model.update_counts(flat_states, flat_actions)
+            updated_observation_counts = carry_observation_counts.update_counts(
+                flat_states, flat_actions
+            )
 
             # Compute Targets
             if args.lambda_returns:
@@ -442,6 +459,30 @@ def make_run(args):
             metrics["length_ema"] = updated_episode_lengths_ema
             metrics["intrinsic_return_ema"] = updated_intrinsic_return_ema
 
+            # Capture count snapshots at this update step
+            step_model = eqx.combine(epoch_params, static)
+            step_counts = step_model.counts
+            step_obs_counts = updated_observation_counts
+
+            # Also compute the observation counts based on what Simone mentioned here
+            obs_dim = updated_observation_counts.low.shape[0]
+            num_bins = updated_observation_counts.observation_counts.shape[1]
+            grids = [
+                jnp.linspace(
+                    updated_observation_counts.low[i],
+                    updated_observation_counts.high[i],
+                    num_bins,
+                )
+                for i in range(obs_dim)
+            ]
+
+            mesh = jnp.meshgrid(*grids, indexing="ij")
+            # (N ** obs_dim, obs_dim)
+            grid_points = jnp.stack(mesh, axis=-1).reshape(-1, obs_dim)
+            grid_discrete = jax.vmap(step_model.get_discrete_representation)(
+                grid_points
+            )
+
             return (
                 epoch_key,
                 step_number,
@@ -450,7 +491,8 @@ def make_run(args):
                 epoch_params,
                 epoch_opt_state,
                 updated_episode_metrics,
-            ), metrics
+                updated_observation_counts,
+            ), (metrics, step_counts, step_obs_counts, grid_discrete)
 
         training_carry = (
             key,
@@ -460,13 +502,32 @@ def make_run(args):
             dynamic_params,
             initial_opt_state,
             episode_metrics,
+            observation_counts,
         )
-        final_carry, metrics = jax.lax.scan(
-            train_step, training_carry, None, num_updates
-        )
-        final_model = eqx.combine(final_carry[4], static)
 
-        return final_model.counts, metrics
+        # Single scan over all update steps. counts and obs_counts are returned
+        # at every step (shape: (num_updates, ...)) so __main__ can select
+        # whichever timesteps it wants to save — no divisibility constraint needed.
+        final_carry, (
+            metrics,
+            counts_history,
+            obs_counts_history,
+            grid_discrete_history,
+        ) = jax.lax.scan(train_step, training_carry, None, num_updates)
+
+        final_model = eqx.combine(final_carry[4], static)
+        observation_counts = final_carry[-1]
+
+        # counts_history      : (num_updates, *counts_shape)
+        # obs_counts_history  : ObservationCounts with leaves (num_updates, ...)
+        return (
+            final_model.counts,
+            observation_counts,
+            counts_history,
+            obs_counts_history,
+            grid_discrete_history,
+            metrics,
+        )
 
     return run
 
@@ -504,15 +565,73 @@ if __name__ == "__main__":
     print("Starting Run")
     rng = jax.random.PRNGKey(args.seed)
 
+    num_updates = int(args.total_time_steps // args.num_environments // args.num_steps)
+    timesteps_per_update = int(args.num_steps * args.num_environments)
+
     t0 = time.time()
     rngs = jax.random.split(rng, args.num_seeds)
     compiled_run = jax.jit(jax.vmap(make_run(args)))
-    counts, metrics = jax.block_until_ready(compiled_run(rngs))
+    (
+        counts,
+        observation_counts,
+        counts_history,
+        obs_counts_history,
+        grid_discrete_history,
+        metrics,
+    ) = jax.block_until_ready(compiled_run(rngs))
     print(f"Total time: {time.time() - t0}")
 
     metrics_path = save_path / "metrics.npz"
     np.savez(metrics_path, **metrics)
 
-    counts_path = save_path / "counts.npy"
+    # Save final counts
+    counts_path = save_path / "final_counts.npy"
     np.save(counts_path, counts)
+
+    obs_counts_path = save_path / "final_observation_counts.npy"
+    np.save(obs_counts_path, observation_counts.observation_counts)
+
+    grid_discrete_path = save_path / "final_grid_discrete.npy"
+    np.save(grid_discrete_path, grid_discrete_history[:, -1])
+
+    # Save count snapshots at each interval.
+    # counts_history and obs_counts_history have shape (num_seeds, num_updates, ...)
+    # after vmap. We find the update index closest to each desired timestep boundary
+    # and save that slice — no divisibility constraint required.
+    _raw_interval = getattr(args, "count_save_timestep_interval", 0)
+    if _raw_interval > 0:
+        save_interval_timesteps = int(_raw_interval)
+        boundaries = range(
+            save_interval_timesteps,
+            num_updates * timesteps_per_update + 1,
+            save_interval_timesteps,
+        )
+
+        # Create dirs for data
+        counts_path = save_path / "counts"
+        counts_path.mkdir(exist_ok=True)
+
+        observation_counts_path = save_path / "observation_counts"
+        observation_counts_path.mkdir(exist_ok=True)
+
+        grid_counts_path = save_path / "grid_counts"
+        grid_counts_path.mkdir(exist_ok=True)
+
+        for boundary in boundaries:
+            # Update index whose end-of-step timestep is closest to this boundary
+            idx = min(round(boundary / timesteps_per_update) - 1, num_updates - 1)
+            actual_timestep = (idx + 1) * timesteps_per_update
+            np.save(
+                counts_path / f"counts_timestep_{actual_timestep}.npy",
+                counts_history[:, idx],
+            )
+            np.save(
+                observation_counts_path / f"observation_counts_timestep_{actual_timestep}.npy",
+                obs_counts_history.observation_counts[:, idx],
+            )
+            np.save(
+                grid_counts_path / f"grid_discrete_timestep_{actual_timestep}.npy",
+                grid_discrete_history[:, idx],
+            )
+
     print("Finished Run")
