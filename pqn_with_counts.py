@@ -176,11 +176,24 @@ def make_run(args):
         )
 
         # Get the distribution of states and actions if we just had a num_bins by num_bins grid
-        observation_counts = ObservationCounts.create(
-            num_bins=initial_model.num_bins,
-            low=env.observation_space(env_params).low,
-            high=env.observation_space(env_params).high,
-            num_actions=num_actions,
+        jax.debug.print(
+            "Observation space low: {}, high: {}",
+            env.observation_space(env_params).low,
+            env.observation_space(env_params).high,
+        )
+        jax.debug.print(
+            "Observation space shape: {}", env.observation_space(env_params).shape
+        )
+
+        observation_counts = (
+            ObservationCounts.create(
+                num_bins=initial_model.num_bins,
+                low=env.observation_space(env_params).low,
+                high=env.observation_space(env_params).high,
+                num_actions=num_actions,
+            )
+            if args.count_observations
+            else None
         )
 
         step_number = 0
@@ -290,11 +303,14 @@ def make_run(args):
             model = model.update_counts(flat_discrete_state, flat_discrete_actions)
 
             # Update Observation counts
-            flat_states = transitions.state.reshape(-1, transitions.state.shape[-1])
-            flat_actions = transitions.action.reshape(-1)
-            updated_observation_counts = carry_observation_counts.update_counts(
-                flat_states, flat_actions
-            )
+            if args.count_observations:
+                flat_states = transitions.state.reshape(-1, transitions.state.shape[-1])
+                flat_actions = transitions.action.reshape(-1)
+                updated_observation_counts = carry_observation_counts.update_counts(
+                    flat_states, flat_actions
+                )
+            else:
+                updated_observation_counts = None
 
             # Compute Targets
             if args.lambda_returns:
@@ -465,23 +481,26 @@ def make_run(args):
             step_obs_counts = updated_observation_counts
 
             # Also compute the observation counts based on what Simone mentioned here
-            obs_dim = updated_observation_counts.low.shape[0]
-            num_bins = updated_observation_counts.observation_counts.shape[1]
-            grids = [
-                jnp.linspace(
-                    updated_observation_counts.low[i],
-                    updated_observation_counts.high[i],
-                    num_bins,
-                )
-                for i in range(obs_dim)
-            ]
+            if args.count_observations:
+                obs_dim = updated_observation_counts.low.shape[0]
+                num_bins = updated_observation_counts.observation_counts.shape[1]
+                grids = [
+                    jnp.linspace(
+                        updated_observation_counts.low[i],
+                        updated_observation_counts.high[i],
+                        num_bins,
+                    )
+                    for i in range(obs_dim)
+                ]
 
-            mesh = jnp.meshgrid(*grids, indexing="ij")
-            # (N ** obs_dim, obs_dim)
-            grid_points = jnp.stack(mesh, axis=-1).reshape(-1, obs_dim)
-            grid_discrete = jax.vmap(step_model.get_discrete_representation)(
-                grid_points
-            )
+                mesh = jnp.meshgrid(*grids, indexing="ij")
+                # (N ** obs_dim, obs_dim)
+                grid_points = jnp.stack(mesh, axis=-1).reshape(-1, obs_dim)
+                grid_discrete = jax.vmap(step_model.get_discrete_representation)(
+                    grid_points
+                )
+            else:
+                grid_discrete = None
 
             return (
                 epoch_key,
@@ -588,8 +607,9 @@ if __name__ == "__main__":
     counts_path = save_path / "final_counts.npy"
     np.save(counts_path, counts)
 
-    obs_counts_path = save_path / "final_observation_counts.npy"
-    np.save(obs_counts_path, observation_counts.observation_counts)
+    if args.count_observations:
+        obs_counts_path = save_path / "final_observation_counts.npy"
+        np.save(obs_counts_path, observation_counts.observation_counts)
 
     grid_discrete_path = save_path / "final_grid_discrete.npy"
     np.save(grid_discrete_path, grid_discrete_history[:, -1])
@@ -611,8 +631,9 @@ if __name__ == "__main__":
         counts_path = save_path / "counts"
         counts_path.mkdir(exist_ok=True)
 
-        observation_counts_path = save_path / "observation_counts"
-        observation_counts_path.mkdir(exist_ok=True)
+        if args.count_observations:
+            observation_counts_path = save_path / "observation_counts"
+            observation_counts_path.mkdir(exist_ok=True)
 
         grid_counts_path = save_path / "grid_counts"
         grid_counts_path.mkdir(exist_ok=True)
@@ -625,10 +646,12 @@ if __name__ == "__main__":
                 counts_path / f"counts_timestep_{actual_timestep}.npy",
                 counts_history[:, idx],
             )
-            np.save(
-                observation_counts_path / f"observation_counts_timestep_{actual_timestep}.npy",
-                obs_counts_history.observation_counts[:, idx],
-            )
+            if args.count_observations:
+                np.save(
+                    observation_counts_path
+                    / f"observation_counts_timestep_{actual_timestep}.npy",
+                    obs_counts_history.observation_counts[:, idx],
+                )
             np.save(
                 grid_counts_path / f"grid_discrete_timestep_{actual_timestep}.npy",
                 grid_discrete_history[:, idx],

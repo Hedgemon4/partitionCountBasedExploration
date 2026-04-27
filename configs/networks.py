@@ -44,10 +44,9 @@ class QNetworkCounts(BaseNetworkConfig):
     )
 
 
-
 NetworkConfig = Union[
     QNetwork,
     QNetworkCartpole,
     QNetworkCounts,
     BaseNetworkConfig,
-    ]
+]

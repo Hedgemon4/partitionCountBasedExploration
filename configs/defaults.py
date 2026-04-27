@@ -215,6 +215,7 @@ class CartPoleWithIntrinsicRewardsConfig(BaseConfig):
 class MountainCarWithIntrinsicRewardsConfig(BaseConfig):
     # Experiment Configs
     output_folder_name: str = "pqn_same_epsilon_testing"
+    count_observations: bool = True
 
     # Algorithm Configs
     initial_learning_rate: float = 0.001
@@ -253,6 +254,7 @@ class MountainCarWithIntrinsicRewardsConfig(BaseConfig):
 class DoorKeyWithIntrinsicRewardsConfig(BaseConfig):
     # Experiment Configs
     output_folder_name: str = "pqn_doorkey_with_intrinsic_rewards"
+    count_observations: bool = False
 
     # Algorithm Configs
     initial_learning_rate: float = 0.0001
