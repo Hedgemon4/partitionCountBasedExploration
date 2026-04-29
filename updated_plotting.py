@@ -13,16 +13,16 @@ class Args:
     """Plotting script to group and compare PQN runs based on config.yaml."""
 
     # The root directory to search for metrics.npz files
-    root_dir: Path = Path("data/local/cartpole_fta_testing")
+    root_dir: Path = Path("data/local/test_next_state_prediction")
 
     # The key in the .npz file to visualize
-    metric: str = "extrinsic_return_ema"
+    metric: str = "intrinsic_return_ema"
 
     # Window size for simple moving average smoothing (1 = no smoothing)
     smooth: int = 1
 
     # Directory to save the resulting plots
-    output_dir: Path = Path("cartpole_fta_testing")
+    output_dir: Path = Path("local/test_next_state_prediction")
 
     # Config keys to group by. A separate plot will be generated for each combination.
     # Note: Use dot notation for nested yaml keys, e.g., 'network.hidden_size'
@@ -49,6 +49,8 @@ def process_metrics(filename: Path, metric_name: str, smooth_window: int):
     try:
         data = np.load(filename)
         steps = data["env_step"]
+        for key in data.keys():
+            print(key)
         values = data[metric_name]
 
         # Handle shapes properly (assume n_seeds, n_timesteps)

@@ -5,6 +5,12 @@ import jax.numpy as jnp
 from jax.nn import one_hot
 
 from activations import make_activation
+from configs.networks import (
+    QNetwork as QNetworkConfig,
+    QNetworkCartpole as QNetworkCartpoleConfig,
+    QNetworkCounts as QNetworkCountsConfig,
+    QNetworkCountsWithNextStatePrediction as QNetworkCountsWithNextStatePredictionConfig,
+)
 
 
 class QNetwork(eqx.Module):
@@ -61,11 +67,15 @@ class QNetwork(eqx.Module):
             x = layer(x)
         return x
 
-    def loss(self, states, actions, targets):
-        q_values = jax.vmap(self)(states)
+    def loss(self, mini_batch, targets):
+        q_values = jax.vmap(self)(mini_batch.state)
         index = jnp.arange(q_values.shape[0])
-        selected_q_values = q_values[index, actions]
-        return 0.5 * jnp.mean((selected_q_values - targets) ** 2), selected_q_values
+        selected_q_values = q_values[index, mini_batch.action]
+
+        q_loss = 0.5 * jnp.mean((selected_q_values - targets) ** 2)
+
+        losses = {"total": q_loss, "q": q_loss}
+        return q_loss, (selected_q_values, losses)
 
 
 class QNetworkCounts(eqx.Module):
@@ -196,23 +206,24 @@ class QNetworkCounts(eqx.Module):
 
         return self._discrete_representation(jax.lax.stop_gradient(discrete_activation))
 
-    def loss(self, states, actions, targets):
-        q_values, _ = jax.vmap(self)(states)
+    def loss(self, mini_batch, targets):
+        q_values, _ = jax.vmap(self)(mini_batch.state)
         index = jnp.arange(q_values.shape[0])
-        selected_q_values = q_values[index, actions]
-        return 0.5 * jnp.mean((selected_q_values - targets) ** 2), selected_q_values
+        selected_q_values = q_values[index, mini_batch.action]
 
-class QNetworkCountsWithNextStatePrediction(eqx.Module):
-    blocks: list
-    value_head: list
-    counts: Array
-    count_layer: int
-    num_bins: int
+        q_loss = 0.5 * jnp.mean((selected_q_values - targets) ** 2)
+
+        losses = {"total": q_loss, "q": q_loss}
+        return q_loss, (selected_q_values, losses)
+
+class QNetworkCountsWithNextStatePrediction(QNetworkCounts):
     next_state_head: list
+    next_state_coef: float
 
     def __init__(self, input_size, num_actions, key, network_config):
         self.blocks = []
         self.count_layer = network_config.count_layer
+        self.next_state_coef = network_config.next_state_coef
         blocks = network_config.blocks
         # +2 keys: one for value_head, one for next_state_head
         keys = jax.random.split(key, len(blocks) + 2)
@@ -316,22 +327,52 @@ class QNetworkCountsWithNextStatePrediction(eqx.Module):
 
         return x, discrete_representation, predicted_next_state
 
-    def loss(self, states, actions, targets, next_states, next_state_coef=1.0):
-        # `predicted_next_states` are the model's prediction of s_{t+1} from s_t.
-        # `next_states` are the actual observed s_{t+1} from the replay batch.
-        q_values, _, predicted_next_states = jax.vmap(self)(states)
+    def loss(self, mini_batch, targets):
+        q_values, _, predicted_next_states = jax.vmap(self)(mini_batch.state)
         index = jnp.arange(q_values.shape[0])
-        selected_q_values = q_values[index, actions]
+        selected_q_values = q_values[index, mini_batch.action]
 
         q_loss = 0.5 * jnp.mean((selected_q_values - targets) ** 2)
 
-        # Compare prediction to the *actual* next state, not the current state.
-        # stop_gradient on the target prevents the prediction loss from
-        # back-propagating through the next-state observation if it ever
-        # becomes a function of the model's parameters elsewhere.
         next_state_loss = 0.5 * jnp.mean(
-            (predicted_next_states - jax.lax.stop_gradient(next_states)) ** 2
+            (predicted_next_states - jax.lax.stop_gradient(mini_batch.next_state)) ** 2
         )
 
-        total_loss = q_loss + next_state_coef * next_state_loss
-        return total_loss, (selected_q_values, q_loss, next_state_loss)
+        total_loss = q_loss + self.next_state_coef * next_state_loss
+
+        losses = {
+            "total": total_loss,
+            "q": q_loss,
+            "next_state": next_state_loss,
+        }
+        return total_loss, (selected_q_values, losses)
+
+
+def make_network(input_size, num_actions, key, network_config):
+    """Build the network corresponding to `network_config`.
+
+    Mirrors `make_activation` — dispatches on the config dataclass type so the
+    caller doesn't need to hardcode a class.
+    """
+    if isinstance(network_config, (QNetworkConfig, QNetworkCartpoleConfig)):
+        return QNetwork(
+            input_size=input_size,
+            num_actions=num_actions,
+            key=key,
+            network_config=network_config,
+        )
+    elif isinstance(network_config, QNetworkCountsWithNextStatePredictionConfig):
+        return QNetworkCountsWithNextStatePrediction(
+            input_size=input_size,
+            num_actions=num_actions,
+            key=key,
+            network_config=network_config,
+        )
+    elif isinstance(network_config, QNetworkCountsConfig):
+        return QNetworkCounts(
+            input_size=input_size,
+            num_actions=num_actions,
+            key=key,
+            network_config=network_config,
+        )
+    raise ValueError(f"Unknown network config: {type(network_config)}")
