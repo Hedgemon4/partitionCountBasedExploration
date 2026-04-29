@@ -27,7 +27,6 @@ import numpy as np
 import tyro
 import yaml
 
-
 ACTION_COLORS = ["#4C72B0", "#DD8452", "#55A467"]  # up to 3 actions (MountainCar)
 ACTION_LABELS_DEFAULT = {
     3: ["Action 0 (push left)", "Action 1 (no-op)", "Action 2 (push right)"],
@@ -76,7 +75,11 @@ def aggregate_counts(counts: np.ndarray):
     per_seed = per_seed_action.sum(axis=1)  # (seeds, bins)
     action_mean = per_seed_action.mean(axis=0)  # (actions, bins)
     per_bin_mean = per_seed.mean(axis=0)
-    per_bin_std = per_seed.std(axis=0, ddof=1) if per_seed.shape[0] > 1 else np.zeros_like(per_bin_mean)
+    per_bin_std = (
+        per_seed.std(axis=0, ddof=1)
+        if per_seed.shape[0] > 1
+        else np.zeros_like(per_bin_mean)
+    )
     return {
         "per_seed_action": per_seed_action,
         "per_seed": per_seed,
@@ -267,7 +270,9 @@ def plot_histogram_with_actions(
                 va="top",
                 ha="left",
                 family="monospace",
-                bbox=dict(facecolor="#fff5cc", edgecolor="#cc9900", boxstyle="round,pad=0.4"),
+                bbox=dict(
+                    facecolor="#fff5cc", edgecolor="#cc9900", boxstyle="round,pad=0.4"
+                ),
             )
         else:
             ax.text(
@@ -279,7 +284,9 @@ def plot_histogram_with_actions(
                 va="top",
                 ha="left",
                 family="monospace",
-                bbox=dict(facecolor="#e6f4ea", edgecolor="#44aa66", boxstyle="round,pad=0.4"),
+                bbox=dict(
+                    facecolor="#e6f4ea", edgecolor="#44aa66", boxstyle="round,pad=0.4"
+                ),
             )
 
     if created_fig:
@@ -356,7 +363,9 @@ def plot_neuron_summary(
         cmap="viridis",
         origin="lower",
     )
-    ax1.set_title("(a) Mean bin probability per neuron  (averaged over seeds)", fontsize=11)
+    ax1.set_title(
+        "(a) Mean bin probability per neuron  (averaged over seeds)", fontsize=11
+    )
     ax1.set_xlabel("FTA Bin Index")
     ax1.set_ylabel(f"Neuron index (sorted by argmax bin; {N} neurons)")
     ax1.set_xticks(np.arange(B))
@@ -556,7 +565,9 @@ def main(args: Args):
         )
         out = args.output_dir / f"hist_beta_{beta}_{folder.name}.png"
         plot_histogram_with_actions(
-            counts, title=title, out_path=out,
+            counts,
+            title=title,
+            out_path=out,
             highlight=(beta == best_beta),
         )
         # Per-neuron summary for the same config

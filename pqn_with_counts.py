@@ -611,7 +611,8 @@ if __name__ == "__main__":
                 counts_history[:, idx],
             )
             np.save(
-                observation_counts_path / f"observation_counts_timestep_{actual_timestep}.npy",
+                observation_counts_path
+                / f"observation_counts_timestep_{actual_timestep}.npy",
                 obs_counts_history.observation_counts[:, idx],
             )
             np.save(

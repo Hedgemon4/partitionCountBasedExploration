@@ -1,6 +1,10 @@
 from typing import Any
 
-from gymnax.environments.classic_control.mountain_car import MountainCar, EnvState, EnvParams
+from gymnax.environments.classic_control.mountain_car import (
+    MountainCar,
+    EnvState,
+    EnvParams,
+)
 import jax
 import jax.numpy as jnp
 

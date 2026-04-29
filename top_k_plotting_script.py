@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import warnings
 import scipy.stats as stats
+
 # Import shared histogram helpers so every bin-usage plot across the project
 # uses the exact same format (stacked by action, seed std error bars, per-seed
 # dots, percentage labels, outlier annotation).
@@ -19,12 +20,11 @@ from count_histogram import (
     aggregate_counts,
 )
 
-
 # Snapshot subdirectories written by pqn_with_counts.py when
 # count_save_timestep_interval > 0. Each directory contains one .npy file
 # per saved boundary timestep, named {prefix}_timestep_{N}.npy.
 SNAPSHOT_DIRS = {
-    "counts": ("counts", "counts"),                               # (dirname, filename prefix)
+    "counts": ("counts", "counts"),  # (dirname, filename prefix)
     "observation_counts": ("observation_counts", "observation_counts"),
     "grid_counts": ("grid_counts", "grid_discrete"),
 }
@@ -433,7 +433,9 @@ def _plot_count_histograms(top_results, args: Args):
     report_path = hist_dir / "outlier_seeds.txt"
     with open(report_path, "w") as f:
         f.write("Outlier seeds per top-k run\n")
-        f.write("(Flagged when a bin is 0, an (action,bin) cell is 0, or |z|>2 for any bin)\n\n")
+        f.write(
+            "(Flagged when a bin is 0, an (action,bin) cell is 0, or |z|>2 for any bin)\n\n"
+        )
         f.write("\n".join(outlier_report_lines))
     print(f"  saved {report_path}")
 
@@ -443,7 +445,9 @@ def _plot_count_histograms(top_results, args: Args):
 # ---------------------------------------------------------------------------
 
 
-def _load_obs_space_bounds(folder: Path) -> Tuple[Optional[List[float]], Optional[List[float]], Optional[List[str]]]:
+def _load_obs_space_bounds(
+    folder: Path,
+) -> Tuple[Optional[List[float]], Optional[List[float]], Optional[List[str]]]:
     """Best-effort lookup of the observation-space extents for a run.
 
     Used purely for nicer axis labels on the 2D heatmaps. Returns
@@ -491,13 +495,20 @@ def _load_snapshot_history(folder: Path) -> Dict[str, Any]:
         return sorted(ts)
 
     counts_ts = _list_timesteps(dir_info["counts"], SNAPSHOT_DIRS["counts"][1])
-    obs_ts = _list_timesteps(dir_info["observation_counts"], SNAPSHOT_DIRS["observation_counts"][1])
+    obs_ts = _list_timesteps(
+        dir_info["observation_counts"], SNAPSHOT_DIRS["observation_counts"][1]
+    )
     grid_ts = _list_timesteps(dir_info["grid_counts"], SNAPSHOT_DIRS["grid_counts"][1])
 
     # Use the counts timesteps as the canonical list when available.
     timesteps = counts_ts or obs_ts or grid_ts
     if not timesteps:
-        return {"timesteps": [], "counts": None, "observation_counts": None, "grid_discrete": None}
+        return {
+            "timesteps": [],
+            "counts": None,
+            "observation_counts": None,
+            "grid_discrete": None,
+        }
 
     def _stack(d: Path, prefix: str, ts_available: List[int]) -> Optional[np.ndarray]:
         if not d.is_dir() or not ts_available:
@@ -514,7 +525,9 @@ def _load_snapshot_history(folder: Path) -> Dict[str, Any]:
         "timesteps": timesteps,
         "counts": _stack(dir_info["counts"], SNAPSHOT_DIRS["counts"][1], counts_ts),
         "observation_counts": _stack(
-            dir_info["observation_counts"], SNAPSHOT_DIRS["observation_counts"][1], obs_ts
+            dir_info["observation_counts"],
+            SNAPSHOT_DIRS["observation_counts"][1],
+            obs_ts,
         ),
         "grid_discrete": _stack(
             dir_info["grid_counts"], SNAPSHOT_DIRS["grid_counts"][1], grid_ts
@@ -525,7 +538,11 @@ def _load_snapshot_history(folder: Path) -> Dict[str, Any]:
 def _fmt_step(t: int) -> str:
     """Short human-friendly timestep label: 49152 -> '49k', 450560 -> '451k'."""
     if t >= 1_000_000:
-        return f"{t/1_000_000:.2f}M".rstrip("0").rstrip(".") + "M" if False else f"{t/1_000_000:.2f}M"
+        return (
+            f"{t/1_000_000:.2f}M".rstrip("0").rstrip(".") + "M"
+            if False
+            else f"{t/1_000_000:.2f}M"
+        )
     if t >= 1_000:
         return f"{round(t/1000)}k"
     return str(t)
@@ -616,8 +633,8 @@ def _plot_fta_evolution(
     # --- (b) Timestep x bin heatmap --------------------------------------
     # counts_hist: (T, seeds, actions, neurons, bins)
     # per-seed per-bin total (sum over neurons, actions) then mean over seeds
-    per_seed_bin = counts_hist.sum(axis=(2, 3))        # (T, seeds, bins)
-    mean_per_bin = per_seed_bin.mean(axis=1)           # (T, bins)
+    per_seed_bin = counts_hist.sum(axis=(2, 3))  # (T, seeds, bins)
+    mean_per_bin = per_seed_bin.mean(axis=1)  # (T, bins)
 
     n_bins = mean_per_bin.shape[1]
     fig2, ax2 = plt.subplots(figsize=(max(6, 0.45 * n_bins + 4), max(3, 0.4 * T + 1.5)))
@@ -712,7 +729,9 @@ def _plot_obs_counts_evolution(
     # Leave headroom for the two-line suptitle before adding the colorbar
     # (colorbar reuses the axes layout, so adjust BEFORE calling it).
     fig.subplots_adjust(top=0.78, bottom=0.15)
-    cbar = fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.85, label="mean visits per seed")
+    cbar = fig.colorbar(
+        im, ax=axes.ravel().tolist(), shrink=0.85, label="mean visits per seed"
+    )
     out_path = out_dir / f"obs_visitation_rank_{rank:02d}_{res['folder'].name}.png"
     fig.savefig(out_path, dpi=180, bbox_inches="tight")
     plt.close(fig)
@@ -769,7 +788,9 @@ def _plot_obs_counts_evolution(
         "(colour scale shared within each action row, averaged across seeds)",
         fontsize=11,
     )
-    out_path2 = out_dir / f"obs_visitation_per_action_rank_{rank:02d}_{res['folder'].name}.png"
+    out_path2 = (
+        out_dir / f"obs_visitation_per_action_rank_{rank:02d}_{res['folder'].name}.png"
+    )
     fig2.savefig(out_path2, dpi=180, bbox_inches="tight")
     plt.close(fig2)
     print(f"  saved {out_path2}")
@@ -807,9 +828,9 @@ def _plot_grid_dominant_bin_evolution(
         return
 
     # Average the per-grid-point bin distribution across seeds, then argmax.
-    mean_over_seeds = grid_hist.mean(axis=1)                     # (T, G, N, B)
-    bin_dist = mean_over_seeds.sum(axis=2)                       # (T, G, B)
-    dominant = bin_dist.argmax(axis=-1)                          # (T, G)
+    mean_over_seeds = grid_hist.mean(axis=1)  # (T, G, N, B)
+    bin_dist = mean_over_seeds.sum(axis=2)  # (T, G, B)
+    dominant = bin_dist.argmax(axis=-1)  # (T, G)
     # Reshape to the 2D grid. meshgrid(indexing='ij') → first obs dim is the
     # outer axis, so reshape gives (dim0, dim1).
     dominant_2d = dominant.reshape(T, side, side)
@@ -895,9 +916,9 @@ def _plot_grid_dominant_bin_per_seed(
         return
 
     # Per-seed per-grid-point bin distribution (sum over neurons), then argmax.
-    bin_dist = grid_hist.sum(axis=3)                       # (T, S, G, B)
-    dominant = bin_dist.argmax(axis=-1)                    # (T, S, G)
-    dominant_2d = dominant.reshape(T, S, side, side)       # (T, S, side, side)
+    bin_dist = grid_hist.sum(axis=3)  # (T, S, G, B)
+    dominant = bin_dist.argmax(axis=-1)  # (T, S, G)
+    dominant_2d = dominant.reshape(T, S, side, side)  # (T, S, side, side)
 
     low, high, axis_names = _load_obs_space_bounds(folder)
     xlabel = axis_names[0] if axis_names else "obs dim 0"
@@ -918,7 +939,8 @@ def _plot_grid_dominant_bin_per_seed(
 
     for ti, t in enumerate(timesteps):
         fig, axes = plt.subplots(
-            nrows, ncols,
+            nrows,
+            ncols,
             figsize=(1.8 * ncols, 1.8 * nrows + 1.5),
             squeeze=False,
             sharex=True,
@@ -955,7 +977,9 @@ def _plot_grid_dominant_bin_per_seed(
         )
         fig.subplots_adjust(top=0.90, bottom=0.08, right=0.88, hspace=0.45, wspace=0.15)
         cbar_ax = fig.add_axes([0.91, 0.10, 0.015, 0.78])
-        cbar = fig.colorbar(im, cax=cbar_ax, ticks=np.arange(B), label="dominant FTA bin")
+        cbar = fig.colorbar(
+            im, cax=cbar_ax, ticks=np.arange(B), label="dominant FTA bin"
+        )
         cbar.ax.set_yticklabels([str(b) for b in range(B)])
 
         out_path = run_dir / f"t_{t}.png"
@@ -992,14 +1016,14 @@ def _plot_grid_full_distribution(
         return
 
     # Mean across seeds, sum across neurons → per-grid-point bin count.
-    bin_counts = grid_hist.mean(axis=1).sum(axis=2)                          # (T, G, B)
+    bin_counts = grid_hist.mean(axis=1).sum(axis=2)  # (T, G, B)
     # Normalize each grid point's distribution to a probability so bars are
     # comparable across locations even when totals differ.
     totals = bin_counts.sum(axis=-1, keepdims=True).clip(min=1e-12)
-    bin_probs = bin_counts / totals                                          # (T, G, B)
+    bin_probs = bin_counts / totals  # (T, G, B)
     # Reshape using the meshgrid(indexing="ij") convention: first axis is
     # obs dim 0 (position), second is obs dim 1 (velocity).
-    bin_probs_2d = bin_probs.reshape(T, side, side, B)                       # (T, pos, vel, bin)
+    bin_probs_2d = bin_probs.reshape(T, side, side, B)  # (T, pos, vel, bin)
 
     low, high, axis_names = _load_obs_space_bounds(folder)
     xlabel = axis_names[0] if axis_names else "obs dim 0"
@@ -1018,9 +1042,12 @@ def _plot_grid_full_distribution(
 
     for ti, t in enumerate(timesteps):
         fig, axes = plt.subplots(
-            side, side,
+            side,
+            side,
             figsize=(1.1 * side + 1.5, 1.1 * side + 1.5),
-            sharex=True, sharey=True, squeeze=False,
+            sharex=True,
+            sharey=True,
+            squeeze=False,
         )
         for vel_bin in range(side):
             for pos_bin in range(side):
@@ -1029,7 +1056,9 @@ def _plot_grid_full_distribution(
                 # index so "row 0" on the display is the highest velocity.
                 ax = axes[side - 1 - vel_bin][pos_bin]
                 probs = bin_probs_2d[ti, pos_bin, vel_bin]
-                ax.bar(np.arange(B), probs, color=bin_colors, edgecolor="none", width=0.9)
+                ax.bar(
+                    np.arange(B), probs, color=bin_colors, edgecolor="none", width=0.9
+                )
                 ax.set_xticks([])
                 ax.set_yticks([])
                 ax.set_ylim(0, y_max)
@@ -1043,14 +1072,17 @@ def _plot_grid_full_distribution(
             axes[side - 1][pos_bin].set_xlabel(str(pos_bin), fontsize=7)
         for vel_bin in range(side):
             axes[side - 1 - vel_bin][0].set_ylabel(
-                str(vel_bin), fontsize=7, rotation=0, ha="right", va="center", labelpad=6
+                str(vel_bin),
+                fontsize=7,
+                rotation=0,
+                ha="right",
+                va="center",
+                labelpad=6,
             )
 
         # Legend mapping bar colour -> bin index. One compact legend for the
         # whole figure, placed to the right of the subplot grid.
-        handles = [
-            plt.Rectangle((0, 0), 1, 1, color=bin_colors[b]) for b in range(B)
-        ]
+        handles = [plt.Rectangle((0, 0), 1, 1, color=bin_colors[b]) for b in range(B)]
         fig.legend(
             handles,
             [f"bin {b}" for b in range(B)],
@@ -1217,12 +1249,14 @@ def _plot_goal_reach_counts(top_results, args: Args) -> None:
                 "folder_name": folder.name,
                 "score": res["score"],
                 "timesteps": np.asarray(timesteps),
-                "per_seed": per_seed,            # (T, S)
+                "per_seed": per_seed,  # (T, S)
             }
         )
 
     if not series:
-        print("[goal] no top-k runs had observation_counts snapshots; skipping goal-reach plot")
+        print(
+            "[goal] no top-k runs had observation_counts snapshots; skipping goal-reach plot"
+        )
         return
 
     cmap = plt.cm.get_cmap("tab10", max(10, len(series)))
@@ -1230,17 +1264,16 @@ def _plot_goal_reach_counts(top_results, args: Args) -> None:
     # --- (a) Curves over training ----------------------------------------
     fig, ax = plt.subplots(figsize=(10, 6))
     for i, s in enumerate(series):
-        per_seed = s["per_seed"]                    # (T, S)
+        per_seed = s["per_seed"]  # (T, S)
         mean = per_seed.mean(axis=1)
         sem = per_seed.std(axis=1, ddof=1) / np.sqrt(per_seed.shape[1])
-        label = (
-            f"Rank {s['rank']} | {s['folder_name']} "
-            f"(score={s['score']:.2f})"
+        label = f"Rank {s['rank']} | {s['folder_name']} " f"(score={s['score']:.2f})"
+        ax.plot(
+            s["timesteps"], mean, marker="o", color=cmap(i), label=label, linewidth=2
         )
-        ax.plot(s["timesteps"], mean, marker="o", color=cmap(i), label=label,
-                linewidth=2)
-        ax.fill_between(s["timesteps"], mean - sem, mean + sem,
-                        color=cmap(i), alpha=0.15)
+        ax.fill_between(
+            s["timesteps"], mean - sem, mean + sem, color=cmap(i), alpha=0.15
+        )
     ax.set_xlabel("Environment Steps")
     ax.set_ylabel(
         f"Cumulative goal-region visits per seed\n"
@@ -1264,8 +1297,16 @@ def _plot_goal_reach_counts(top_results, args: Args) -> None:
     means = finals.mean(axis=1)
     sems = finals.std(axis=1, ddof=1) / np.sqrt(finals.shape[1])
     bar_colors = [cmap(i) for i in range(len(series))]
-    ax2.bar(xs, means, yerr=sems, capsize=4, color=bar_colors,
-            edgecolor="black", linewidth=0.8, alpha=0.9)
+    ax2.bar(
+        xs,
+        means,
+        yerr=sems,
+        capsize=4,
+        color=bar_colors,
+        edgecolor="black",
+        linewidth=0.8,
+        alpha=0.9,
+    )
     # Per-seed dots (jittered) on top of each bar so individual seed
     # behaviour is visible — some seeds may reach the goal many times while
     # others never do.
@@ -1273,21 +1314,28 @@ def _plot_goal_reach_counts(top_results, args: Args) -> None:
     for i, s in enumerate(series):
         seeds_final = s["per_seed"][-1]
         jitter = rng.uniform(-0.18, 0.18, size=seeds_final.shape[0])
-        ax2.scatter(np.full_like(seeds_final, i, dtype=float) + jitter,
-                    seeds_final, s=14, color="black", alpha=0.5,
-                    edgecolors="white", linewidths=0.4, zorder=3)
+        ax2.scatter(
+            np.full_like(seeds_final, i, dtype=float) + jitter,
+            seeds_final,
+            s=14,
+            color="black",
+            alpha=0.5,
+            edgecolors="white",
+            linewidths=0.4,
+            zorder=3,
+        )
     ax2.set_xticks(xs)
     ax2.set_xticklabels(
         [f"Rank {s['rank']}\n{s['folder_name']}" for s in series],
-        rotation=30, ha="right", fontsize=8,
+        rotation=30,
+        ha="right",
+        fontsize=8,
     )
     ax2.set_ylabel(
         f"Final cumulative goal-region visits per seed\n"
         f"(position ≥ {MOUNTAINCAR_GOAL_POSITION})"
     )
-    ax2.set_title(
-        f"Final goal-reach counts (Top {len(series)} by {args.score_metric})"
-    )
+    ax2.set_title(f"Final goal-reach counts (Top {len(series)} by {args.score_metric})")
     ax2.grid(True, axis="y", linestyle="--", alpha=0.6)
     fig2.tight_layout()
     out_final = out_dir / "goal_reach_final.png"
