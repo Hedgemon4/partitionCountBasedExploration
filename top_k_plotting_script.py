@@ -37,7 +37,7 @@ class Args:
     """Analyze and plot specific runs from a large hyperparameter sweep."""
 
     root_dir: Path = Path("data/mountaincar_bounds_sweep")
-    metric: str = "extrinsic_return_ema"
+    metric: str = "length_ema"
     intrinsic_metric: str = "intrinsic_return_ema"
     top_k: int = 10
     smooth: int = 1
@@ -248,7 +248,7 @@ def main(args: Args):
                     }
                 )
 
-    all_filtered.sort(key=lambda x: x["score"], reverse=True)
+    all_filtered.sort(key=lambda x: x["score"], reverse=False)
     top_results = all_filtered[: args.top_k]
     if not top_results:
         print("No matching folders.")
