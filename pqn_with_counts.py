@@ -131,7 +131,7 @@ def make_run(args):
         start_state, start_env_state = vmap_reset(args.num_environments)(subkey)
 
         # Get first actions
-        initial_outputs= jax.vmap(initial_model)(start_state)
+        initial_outputs = jax.vmap(initial_model)(start_state)
         initial_q_values = initial_outputs[0]
         initial_discrete_state = initial_outputs[1]
         key, subkey = jax.random.split(key, 2)
@@ -399,9 +399,7 @@ def make_run(args):
                 "q_values": epoch_q_values.mean(),
             }
 
-            metrics.update(
-                {f"loss_{k}": v.mean() for k, v in epoch_losses.items()}
-            )
+            metrics.update({f"loss_{k}": v.mean() for k, v in epoch_losses.items()})
             metrics.update({k: v.mean() for k, v in infos.items()})
 
             # Compute EMA of episode returns and lengths
@@ -539,7 +537,7 @@ ConfigOptions = Union[
     Annotated[
         configs.MountainCarWithIntrinsicRewardsAndStatePredictionConfig,
         tyro.conf.subcommand(name="mountaincar_states"),
-    ]
+    ],
 ]
 
 if __name__ == "__main__":
@@ -621,7 +619,8 @@ if __name__ == "__main__":
                 counts_history[:, idx],
             )
             np.save(
-                observation_counts_path / f"observation_counts_timestep_{actual_timestep}.npy",
+                observation_counts_path
+                / f"observation_counts_timestep_{actual_timestep}.npy",
                 obs_counts_history.observation_counts[:, idx],
             )
             np.save(

@@ -216,6 +216,7 @@ class QNetworkCounts(eqx.Module):
         losses = {"total": q_loss, "q": q_loss}
         return q_loss, (selected_q_values, losses)
 
+
 class QNetworkCountsWithNextStatePrediction(QNetworkCounts):
     next_state_head: list
     next_state_coef: float

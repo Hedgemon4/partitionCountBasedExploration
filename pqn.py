@@ -308,9 +308,7 @@ def make_run(args):
             }
             # `epoch_losses` is a dict; one entry per loss component. Mean each
             # one across the scan dimensions and prefix with `loss/` for logging.
-            metrics.update(
-                {f"loss_{k}": v.mean() for k, v in epoch_losses.items()}
-            )
+            metrics.update({f"loss_{k}": v.mean() for k, v in epoch_losses.items()})
             metrics.update({k: v.mean() for k, v in infos.items()})
 
             # Compute EMA of episode returns and lengths

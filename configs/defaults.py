@@ -3,8 +3,13 @@ import chex
 from configs.activations import ActivationConfig
 from dataclasses import field
 from configs.activations import FTA, Relu
-from configs.networks import QNetworkCounts, NetworkConfig, QNetwork, QNetworkCartpole, \
-    QNetworkCountsWithNextStatePrediction
+from configs.networks import (
+    QNetworkCounts,
+    NetworkConfig,
+    QNetwork,
+    QNetworkCartpole,
+    QNetworkCountsWithNextStatePrediction,
+)
 
 
 @chex.dataclass(frozen=True)
