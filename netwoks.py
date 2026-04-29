@@ -201,3 +201,137 @@ class QNetworkCounts(eqx.Module):
         index = jnp.arange(q_values.shape[0])
         selected_q_values = q_values[index, actions]
         return 0.5 * jnp.mean((selected_q_values - targets) ** 2), selected_q_values
+
+class QNetworkCountsWithNextStatePrediction(eqx.Module):
+    blocks: list
+    value_head: list
+    counts: Array
+    count_layer: int
+    num_bins: int
+    next_state_head: list
+
+    def __init__(self, input_size, num_actions, key, network_config):
+        self.blocks = []
+        self.count_layer = network_config.count_layer
+        blocks = network_config.blocks
+        # +2 keys: one for value_head, one for next_state_head
+        keys = jax.random.split(key, len(blocks) + 2)
+        number_of_discrete_states = 0
+
+        input_features = input_size
+        previous_bins = 1
+        for i, block in enumerate(blocks):
+            layer = []
+            hidden_size = block.hidden_size
+            learnable_norm_params = block.learnable_norm_params
+
+            # We need to flatten the output of the activation if there were multiple bins in the previous layer, since each bin will be treated as a separate feature for the next layer
+            if previous_bins > 1:
+                layer.append(eqx.nn.Lambda(jnp.ravel))
+
+            layer.append(
+                eqx.nn.Linear(
+                    in_features=input_features, out_features=hidden_size, key=keys[i]
+                )
+            )
+
+            layer.append(
+                eqx.nn.LayerNorm(
+                    hidden_size,
+                    use_weight=learnable_norm_params,
+                    use_bias=learnable_norm_params,
+                )
+            )
+            activation = make_activation(block.activation)
+            num_bins = getattr(activation, "num_bins", 1)
+
+            if self.count_layer == i + 1:
+                # This will be the layer which outputs the discrete representation, so we need to get the bin size
+                number_of_discrete_states = num_bins
+                self.num_bins = num_bins
+                if number_of_discrete_states < 2:
+                    raise ValueError(
+                        "Count layer must have at least two bins to have a discrete representation"
+                    )
+            layer.append(activation)
+
+            self.blocks.append(layer)
+
+            # Compute the number of input features for the next layer, which will be the hidden size times the number of bins for the current activation
+            input_features = hidden_size * num_bins
+            previous_bins = num_bins
+
+        if number_of_discrete_states == 0:
+            raise ValueError(
+                "Count layer must be set to a valid block number to have a discrete representation for counts"
+            )
+
+        self.counts = jnp.ones(
+            (
+                num_actions,
+                blocks[self.count_layer - 1].hidden_size,
+                number_of_discrete_states,
+            )
+        )
+
+        self.value_head = [
+            eqx.nn.Linear(
+                in_features=blocks[-1].hidden_size,
+                out_features=num_actions,
+                key=keys[-2],
+            ),
+        ]
+
+        # Predicts the next state (same dimensionality as the input observation)
+        # from the shared trunk representation.
+        self.next_state_head = [
+            eqx.nn.Linear(
+                in_features=blocks[-1].hidden_size,
+                out_features=input_size,
+                key=keys[-1],
+            ),
+        ]
+
+    def __call__(self, x):
+        # Explicitly indicate counts are not trainable
+        jax.lax.stop_gradient(self.counts)
+
+        for i, block in enumerate(self.blocks):
+            for layer in block:
+                x = layer(x)
+            # Depending on which layer is being used for counts, select the appropriate activation for the discrete representation
+            if i + 1 == self.count_layer:
+                discrete_activation = x
+
+        shared_output = x
+
+        for layer in self.value_head:
+            x = layer(x)
+
+        predicted_next_state = shared_output
+        for layer in self.next_state_head:
+            predicted_next_state = layer(predicted_next_state)
+
+        discrete_representation = self._discrete_representation(discrete_activation)
+
+        return x, discrete_representation, predicted_next_state
+
+    def loss(self, states, actions, targets, next_states, next_state_coef=1.0):
+        # `predicted_next_states` are the model's prediction of s_{t+1} from s_t.
+        # `next_states` are the actual observed s_{t+1} from the replay batch.
+        q_values, _, predicted_next_states = jax.vmap(self)(states)
+        index = jnp.arange(q_values.shape[0])
+        selected_q_values = q_values[index, actions]
+
+        q_loss = 0.5 * jnp.mean((selected_q_values - targets) ** 2)
+
+        # Compare prediction to the *actual* next state, not the current state.
+        # stop_gradient on the target prevents the prediction loss from
+        # back-propagating through the next-state observation if it ever
+        # becomes a function of the model's parameters elsewhere.
+        next_state_loss = 0.5 * jnp.mean(
+            (predicted_next_states - jax.lax.stop_gradient(next_states)) ** 2
+        )
+
+        total_loss = q_loss + next_state_coef * next_state_loss
+        return total_loss, (selected_q_values, q_loss, next_state_loss)
