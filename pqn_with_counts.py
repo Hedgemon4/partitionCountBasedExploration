@@ -15,6 +15,7 @@ import yaml
 from jax import Array
 
 import configs.defaults as configs
+from environments import MountainCarPessimistic
 from exploration import epsilon_greedy
 from helper_functions import update_ema
 from netwoks import QNetworkCounts
@@ -64,13 +65,15 @@ class IntrinsicRewardData:
 
 def make_env(args, episode_length):
     environment_name = args.environment
-    env, env_params = gymnax.make(environment_name)
+    if environment_name == "MountainCar-v0" and args.pessimistic:
+        print("Using pessimistic MountainCar")
+        env = MountainCarPessimistic()
+        env_params = env.default_params
+    else:
+        env, env_params = gymnax.make(environment_name)
     if episode_length is not None:
         env_params = env_params.replace(max_steps_in_episode=episode_length)
     env = FlattenObservationWrapper(env)
-    if environment_name == "MountainCar-v0" and args.pessimistic:
-        print("Using pessimistic wrapper for MountainCar")
-        env = PessimisticMountainCarWrapper(env)
     env = LogWrapper(env)
     vmap_reset = lambda num_envs: lambda random_key: jax.vmap(
         env.reset, in_axes=(0, None)
