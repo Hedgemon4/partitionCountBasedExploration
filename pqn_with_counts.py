@@ -17,7 +17,7 @@ from jax import Array
 import configs.defaults as configs
 from exploration import epsilon_greedy
 from helper_functions import update_ema
-from netwoks import QNetworkCounts
+from netwoks import make_network
 from observations_counting import ObservationCounts
 from wrappers import (
     FlattenObservationWrapper,
@@ -95,7 +95,7 @@ def make_run(args):
     def run(key):
         # Network Setup
         key, subkey = jax.random.split(key, 2)
-        initial_model = QNetworkCounts(
+        initial_model = make_network(
             input_size=input_size,
             num_actions=num_actions,
             key=subkey,
@@ -131,7 +131,9 @@ def make_run(args):
         start_state, start_env_state = vmap_reset(args.num_environments)(subkey)
 
         # Get first actions
-        initial_q_values, initial_discrete_state = jax.vmap(initial_model)(start_state)
+        initial_outputs = jax.vmap(initial_model)(start_state)
+        initial_q_values = initial_outputs[0]
+        initial_discrete_state = initial_outputs[1]
         key, subkey = jax.random.split(key, 2)
         initial_action, initial_selected_q = epsilon_greedy(
             subkey, args.epsilon_start, initial_q_values
@@ -208,7 +210,9 @@ def make_run(args):
                     args.num_environments
                 )(subkey, step_env_state, action)
                 # Get next actions
-                next_q_values, next_discrete_state = jax.vmap(model)(next_state)
+                model_outs = jax.vmap(model)(next_state)
+                next_q_values = model_outs[0]
+                next_discrete_state = model_outs[1]
                 key, subkey = jax.random.split(key, 2)
                 next_action, next_q = epsilon_greedy(subkey, epsilon, next_q_values)
                 scaled_reward = reward * args.reward_scale
@@ -364,15 +368,17 @@ def make_run(args):
                     model_params, optimizer_state = carry
                     model = eqx.combine(model_params, static)
                     mini_batch, targets = batch
-                    (loss_value, loss_q_values), grads = eqx.filter_value_and_grad(
-                        type(model).loss, has_aux=True
-                    )(model, mini_batch.state, mini_batch.action, targets)
+                    (loss_value, (loss_q_values, losses)), grads = (
+                        eqx.filter_value_and_grad(type(model).loss, has_aux=True)(
+                            model, mini_batch, targets
+                        )
+                    )
                     updates, optimizer_state = optim.update(
                         grads, optimizer_state, model_params
                     )
                     model = eqx.apply_updates(model, updates)
                     params, _ = eqx.partition(model, eqx.is_array)
-                    return (params, optimizer_state), (loss_value, loss_q_values)
+                    return (params, optimizer_state), (loss_q_values, losses)
 
                 updates, metrics = jax.lax.scan(
                     update_model, (params, optimizer_state), (minibatches, targets)
@@ -381,7 +387,7 @@ def make_run(args):
                 return (next_rng, updated_params, updated_optimizer), metrics
 
             # Handle key split
-            epoch_outs, (epoch_loss, epoch_q_values) = jax.lax.scan(
+            epoch_outs, (epoch_q_values, epoch_losses) = jax.lax.scan(
                 epoch, (subkey, network_params, carry_opt_state), None, args.num_epochs
             )
             epoch_key, epoch_params, epoch_opt_state = epoch_outs
@@ -390,9 +396,10 @@ def make_run(args):
             metrics = {
                 "env_step": env_step,
                 "update_steps": step_number,
-                "td_loss": epoch_loss.mean(),
                 "q_values": epoch_q_values.mean(),
             }
+
+            metrics.update({f"loss_{k}": v.mean() for k, v in epoch_losses.items()})
             metrics.update({k: v.mean() for k, v in infos.items()})
 
             # Compute EMA of episode returns and lengths
@@ -527,6 +534,10 @@ ConfigOptions = Union[
         configs.MountainCarWithIntrinsicRewardsConfig,
         tyro.conf.subcommand(name="mountaincar"),
     ],
+    Annotated[
+        configs.MountainCarWithIntrinsicRewardsAndStatePredictionConfig,
+        tyro.conf.subcommand(name="mountaincar_states"),
+    ],
 ]
 
 if __name__ == "__main__":
@@ -608,7 +619,8 @@ if __name__ == "__main__":
                 counts_history[:, idx],
             )
             np.save(
-                observation_counts_path / f"observation_counts_timestep_{actual_timestep}.npy",
+                observation_counts_path
+                / f"observation_counts_timestep_{actual_timestep}.npy",
                 obs_counts_history.observation_counts[:, idx],
             )
             np.save(

@@ -47,8 +47,8 @@ class ObservationCounts(eqx.Module):
         # ..., binD-1) cell is updated exactly once per observation.
         obs_dim = bin_index.shape[1]
         per_dim_indexers = tuple(bin_index[:, d] for d in range(obs_dim))
-        updated_counts = self.observation_counts.at[
-            (actions,) + per_dim_indexers
-        ].add(1)
+        updated_counts = self.observation_counts.at[(actions,) + per_dim_indexers].add(
+            1
+        )
 
         return eqx.tree_at(lambda m: m.observation_counts, self, updated_counts)
