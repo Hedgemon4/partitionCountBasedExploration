@@ -44,5 +44,5 @@ fi
 PARAMS=$(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" "$CONFIG_PATH")
 
 echo "Starting Run"
-python pqn_with_counts.py mountaincar $PARAMS
+python pqn_with_counts.py mountaincar_states $PARAMS
 echo "Finished Run"
