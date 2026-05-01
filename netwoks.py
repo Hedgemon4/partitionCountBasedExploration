@@ -80,7 +80,7 @@ class QNetwork(eqx.Module):
 
 class QNetworkCounts(eqx.Module):
     blocks: list
-    value_head: list
+    extrinsic_value_head: list
     counts: Array
     count_layer: int
     num_bins: int
@@ -148,7 +148,7 @@ class QNetworkCounts(eqx.Module):
             )
         )
 
-        self.value_head = [
+        self.extrinsic_value_head = [
             eqx.nn.Linear(
                 in_features=blocks[-1].hidden_size,
                 out_features=num_actions,
@@ -178,7 +178,7 @@ class QNetworkCounts(eqx.Module):
             if i + 1 == self.count_layer:
                 discrete_activation = x
 
-        for layer in self.value_head:
+        for layer in self.extrinsic_value_head:
             x = layer(x)
 
         discrete_representation = self._discrete_representation(discrete_activation)
@@ -217,82 +217,24 @@ class QNetworkCounts(eqx.Module):
         return q_loss, (selected_q_values, losses)
 
 
+class QNetworkCountsSeparateValueHeads(QNetworkCounts):
+    intrinsic_value_head: list
+
+    def __init__(self, input_size, num_actions, key, network_config):
+        super_key, key = jax.random.split(key)
+        super().__init__(input_size, num_actions, super_key, network_config)
+
+
+
+
 class QNetworkCountsWithNextStatePrediction(QNetworkCounts):
     next_state_head: list
     next_state_coef: float
 
     def __init__(self, input_size, num_actions, key, network_config):
-        self.blocks = []
-        self.count_layer = network_config.count_layer
-        self.next_state_coef = network_config.next_state_coef
+        super_key, key = jax.random.split(key)
+        super().__init__(input_size, num_actions, super_key, network_config)
         blocks = network_config.blocks
-        # +2 keys: one for value_head, one for next_state_head
-        keys = jax.random.split(key, len(blocks) + 2)
-        number_of_discrete_states = 0
-
-        input_features = input_size
-        previous_bins = 1
-        for i, block in enumerate(blocks):
-            layer = []
-            hidden_size = block.hidden_size
-            learnable_norm_params = block.learnable_norm_params
-
-            # We need to flatten the output of the activation if there were multiple bins in the previous layer, since each bin will be treated as a separate feature for the next layer
-            if previous_bins > 1:
-                layer.append(eqx.nn.Lambda(jnp.ravel))
-
-            layer.append(
-                eqx.nn.Linear(
-                    in_features=input_features, out_features=hidden_size, key=keys[i]
-                )
-            )
-
-            layer.append(
-                eqx.nn.LayerNorm(
-                    hidden_size,
-                    use_weight=learnable_norm_params,
-                    use_bias=learnable_norm_params,
-                )
-            )
-            activation = make_activation(block.activation)
-            num_bins = getattr(activation, "num_bins", 1)
-
-            if self.count_layer == i + 1:
-                # This will be the layer which outputs the discrete representation, so we need to get the bin size
-                number_of_discrete_states = num_bins
-                self.num_bins = num_bins
-                if number_of_discrete_states < 2:
-                    raise ValueError(
-                        "Count layer must have at least two bins to have a discrete representation"
-                    )
-            layer.append(activation)
-
-            self.blocks.append(layer)
-
-            # Compute the number of input features for the next layer, which will be the hidden size times the number of bins for the current activation
-            input_features = hidden_size * num_bins
-            previous_bins = num_bins
-
-        if number_of_discrete_states == 0:
-            raise ValueError(
-                "Count layer must be set to a valid block number to have a discrete representation for counts"
-            )
-
-        self.counts = jnp.ones(
-            (
-                num_actions,
-                blocks[self.count_layer - 1].hidden_size,
-                number_of_discrete_states,
-            )
-        )
-
-        self.value_head = [
-            eqx.nn.Linear(
-                in_features=blocks[-1].hidden_size,
-                out_features=num_actions,
-                key=keys[-2],
-            ),
-        ]
 
         # Predicts the next state (same dimensionality as the input observation)
         # from the shared trunk representation.
@@ -300,7 +242,7 @@ class QNetworkCountsWithNextStatePrediction(QNetworkCounts):
             eqx.nn.Linear(
                 in_features=blocks[-1].hidden_size,
                 out_features=input_size,
-                key=keys[-1],
+                key=key,
             ),
         ]
 
