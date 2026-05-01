@@ -2,8 +2,8 @@
 
 # Sweep Options
 betas=(0.05 0.01 0.005 0.001 0.0)
-learning_rate=(0.04 0.01 0.004 0.001)
-epsilon_decay=(0.4 0.2 0.1 0.05)
+learning_rate=(0.04 0.01 0.004 0.001 0.0001)
+epsilon_decay=(1.0 0.5 0.2 0.1 0.05)
 final_epsilons=(0.1 0.05 0.01)
 state_prediction_loss_weights=(1.0 0.5 0.25)
 counter=0
