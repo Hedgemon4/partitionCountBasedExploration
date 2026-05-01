@@ -62,6 +62,9 @@ class Args:
     hidden_size: Optional[int] = None
     learnable_norm: Optional[bool] = None
     total_time_steps: Optional[float] = None
+    next_state_coef: Optional[float] = None
+
+# network.next-state-coef
 
 
 def moving_average(x: np.ndarray, w: int):
@@ -111,6 +114,11 @@ def matches_filters(folder_path: Path, args: Args) -> bool:
     if (
         args.activation is not None
         and network_config.get("activation1", {}).get("type") != args.activation
+    ):
+        return False
+    if (
+        args.next_state_coef is not None
+        and network_config.get("next_state_coef") != args.next_state_coef
     ):
         return False
     return True
