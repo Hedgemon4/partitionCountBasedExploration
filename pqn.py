@@ -274,15 +274,17 @@ def make_run(args):
                     model_params, optimizer_state = carry
                     model = eqx.combine(model_params, static)
                     mini_batch, targets = batch
-                    (loss_value, loss_q_values), grads = eqx.filter_value_and_grad(
-                        type(model).loss, has_aux=True
-                    )(model, mini_batch.state, mini_batch.action, targets)
+                    (loss_value, (loss_q_values, losses)), grads = (
+                        eqx.filter_value_and_grad(type(model).loss, has_aux=True)(
+                            model, mini_batch, targets
+                        )
+                    )
                     updates, optimizer_state = optim.update(
                         grads, optimizer_state, eqx.filter(model, eqx.is_array)
                     )
                     model = eqx.apply_updates(model, updates)
                     params, _ = eqx.partition(model, eqx.is_array)
-                    return (params, optimizer_state), (loss_value, loss_q_values)
+                    return (params, optimizer_state), (loss_q_values, losses)
 
                 updates, metrics = jax.lax.scan(
                     update_model, (params, optimizer_state), (minibatches, targets)
@@ -291,7 +293,7 @@ def make_run(args):
                 return (next_rng, updated_params, updated_optimizer), metrics
 
             # Handle key split
-            epoch_outs, (epoch_loss, epoch_q_values) = jax.lax.scan(
+            epoch_outs, (epoch_q_values, epoch_losses) = jax.lax.scan(
                 epoch, (subkey, network_params, carry_opt_state), None, args.num_epochs
             )
             epoch_key, epoch_params, epoch_opt_state = epoch_outs
@@ -302,9 +304,11 @@ def make_run(args):
             metrics = {
                 "env_step": env_step,
                 "update_steps": step_number,
-                "td_loss": epoch_loss.mean(),
                 "q_values": epoch_q_values.mean(),
             }
+            # `epoch_losses` is a dict; one entry per loss component. Mean each
+            # one across the scan dimensions and prefix with `loss/` for logging.
+            metrics.update({f"loss_{k}": v.mean() for k, v in epoch_losses.items()})
             metrics.update({k: v.mean() for k, v in infos.items()})
 
             # Compute EMA of episode returns and lengths
