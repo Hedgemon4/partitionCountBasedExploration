@@ -255,7 +255,7 @@ class MountainCarWithIntrinsicRewardsConfig(BaseConfig):
 class DoorKeyWithIntrinsicRewardsConfig(BaseConfig):
     # Experiment Configs
     output_folder_name: str = "pqn_doorkey_with_intrinsic_rewards"
-    count_observations: bool = False
+    count_observations: bool = True
 
     # Algorithm Configs
     initial_learning_rate: float = 0.0001
@@ -274,6 +274,7 @@ class DoorKeyWithIntrinsicRewardsConfig(BaseConfig):
     num_environments: int = 32
     num_steps: int = 128
     total_time_steps: float = 2e6
+    observation_type: str = "discrete"
 
     # Exploration Configs — higher beta for sparse-reward exploration
     beta: float = 0.5

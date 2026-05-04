@@ -19,7 +19,7 @@ import configs.defaults as configs
 from exploration import epsilon_greedy
 from helper_functions import update_ema
 from netwoks import make_network
-from observations_counting import ObservationCounts
+from observations_counting import ObservationCounts, ObservationCountsDiscrete
 from wrappers import (
     FlattenObservationWrapper,
     LogWrapper,
@@ -187,16 +187,24 @@ def make_run(args):
             "Observation space shape: {}", env.observation_space(env_params).shape
         )
 
-        observation_counts = (
-            ObservationCounts.create(
-                num_bins=initial_model.num_bins,
-                low=env.observation_space(env_params).low,
-                high=env.observation_space(env_params).high,
-                num_actions=num_actions,
+        if args.observation_type == "discrete":
+            observation_counts = (
+                ObservationCountsDiscrete.create(
+                    observation_shape=env.observation_space(env_params).shape,
+                    num_actions=num_actions,
+                )
             )
-            if args.count_observations
-            else None
-        )
+        else:
+            observation_counts = (
+                ObservationCounts.create(
+                    num_bins=initial_model.num_bins,
+                    low=env.observation_space(env_params).low,
+                    high=env.observation_space(env_params).high,
+                    num_actions=num_actions,
+                )
+                if args.count_observations
+                else None
+            )
 
         step_number = 0
         env_step = 0
@@ -307,7 +315,7 @@ def make_run(args):
             model = model.update_counts(flat_discrete_state, flat_discrete_actions)
 
             # Update Observation counts
-            if args.count_observations:
+            if args.observation_type == "discrete" or args.count_observations:
                 flat_states = transitions.state.reshape(-1, transitions.state.shape[-1])
                 flat_actions = transitions.action.reshape(-1)
                 updated_observation_counts = carry_observation_counts.update_counts(
@@ -488,7 +496,7 @@ def make_run(args):
             step_obs_counts = updated_observation_counts
 
             # Also compute the observation counts based on what Simone mentioned here
-            if args.count_observations:
+            if args.count_observations and args.observation_type != "discrete":
                 obs_dim = updated_observation_counts.low.shape[0]
                 num_bins = updated_observation_counts.observation_counts.shape[1]
                 grids = [
@@ -619,12 +627,13 @@ if __name__ == "__main__":
     counts_path = save_path / "final_counts.npy"
     np.save(counts_path, counts)
 
-    if args.count_observations:
+    if args.count_observations or args.observation_type == "discrete":
         obs_counts_path = save_path / "final_observation_counts.npy"
         np.save(obs_counts_path, observation_counts.observation_counts)
 
-    grid_discrete_path = save_path / "final_grid_discrete.npy"
-    np.save(grid_discrete_path, grid_discrete_history[:, -1])
+    if args.count_observations and args.observation_type != "discrete":
+        grid_discrete_path = save_path / "final_grid_discrete.npy"
+        np.save(grid_discrete_path, grid_discrete_history[:, -1])
 
     # Save count snapshots at each interval.
     # counts_history and obs_counts_history have shape (num_seeds, num_updates, ...)
@@ -643,12 +652,13 @@ if __name__ == "__main__":
         counts_path = save_path / "counts"
         counts_path.mkdir(exist_ok=True)
 
-        if args.count_observations:
+        if args.count_observations or args.observation_type == "discrete":
             observation_counts_path = save_path / "observation_counts"
             observation_counts_path.mkdir(exist_ok=True)
 
-        grid_counts_path = save_path / "grid_counts"
-        grid_counts_path.mkdir(exist_ok=True)
+        if args.count_observations and args.observation_type != "discrete":
+            grid_counts_path = save_path / "grid_counts"
+            grid_counts_path.mkdir(exist_ok=True)
 
         for boundary in boundaries:
             # Update index whose end-of-step timestep is closest to this boundary
@@ -658,14 +668,16 @@ if __name__ == "__main__":
                 counts_path / f"counts_timestep_{actual_timestep}.npy",
                 counts_history[:, idx],
             )
-            np.save(
-                observation_counts_path
-                / f"observation_counts_timestep_{actual_timestep}.npy",
-                obs_counts_history.observation_counts[:, idx],
-            )
-            np.save(
-                grid_counts_path / f"grid_discrete_timestep_{actual_timestep}.npy",
-                grid_discrete_history[:, idx],
-            )
+            if args.count_observations or args.observation_type == "discrete":
+                np.save(
+                    observation_counts_path
+                    / f"observation_counts_timestep_{actual_timestep}.npy",
+                    obs_counts_history.observation_counts[:, idx],
+                )
+            if args.count_observations and args.observation_type != "discrete":
+                np.save(
+                    grid_counts_path / f"grid_discrete_timestep_{actual_timestep}.npy",
+                    grid_discrete_history[:, idx],
+                )
 
     print("Finished Run")

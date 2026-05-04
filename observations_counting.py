@@ -52,3 +52,28 @@ class ObservationCounts(eqx.Module):
         )
 
         return eqx.tree_at(lambda m: m.observation_counts, self, updated_counts)
+    
+
+class ObservationCountsDiscrete(eqx.Module):
+    "For environments with discrete observations like doorkey"
+
+    observation_counts: chex.Array
+    observation_shape: tuple = eqx.field(static=True)
+
+    @classmethod
+    def create(cls, observation_shape, num_actions):
+        observation_counts = jnp.zeros(
+            (num_actions,) + tuple(observation_shape), dtype=jnp.int32
+        )
+        return cls(
+            observation_counts=observation_counts,
+            observation_shape=tuple(observation_shape),
+        )
+
+    def update_counts(self, observations, actions):
+        # observations: (num_envs, flat_obs_size)
+        # actions: (num_envs,)
+        reshaped_obs = observations.reshape(-1, *self.observation_shape).astype(jnp.int32)
+        updated_counts = self.observation_counts.at[actions].add(reshaped_obs)
+        return eqx.tree_at(lambda m: m.observation_counts, self, updated_counts)
+    
