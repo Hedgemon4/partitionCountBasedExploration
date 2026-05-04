@@ -7,6 +7,14 @@ import jax
 from gymnax.environments import environment, spaces
 import jax.numpy as jnp
 import numpy as np
+from navix import Environment
+
+try:
+    import navix as _navix  # noqa: F401
+
+    _NAVIX_AVAILABLE = True
+except ImportError:
+    _NAVIX_AVAILABLE = False
 
 
 class GymnaxWrapper(object):
@@ -18,6 +26,16 @@ class GymnaxWrapper(object):
     # provide proxy access to regular attributes of wrapped object
     def __getattr__(self, name):
         return getattr(self._env, name)
+
+
+def NavixFlattenObservationWrapper(env: Environment):
+    """A wrapper to flatten the observation space of the environment."""
+    flatten_obs_fn = lambda x: jnp.ravel(env.observation_fn(x))
+    flatten_obs_shape = (int(np.prod(env.observation_space.shape)),)
+    return env.replace(
+        observation_fn=flatten_obs_fn,
+        observation_space=env.observation_space.replace(shape=flatten_obs_shape),
+    )
 
 
 class FlattenObservationWrapper(GymnaxWrapper):
@@ -117,6 +135,32 @@ class LogWrapper(GymnaxWrapper):
         info["timestep"] = state.timestep
         info["returned_episode"] = done
         return obs, state, reward, done, info
+
+
+class NavixGymnaxWrapper:
+    def __init__(self, navix_env):
+        self._env = navix_env
+
+    def reset(self, key, params=None):
+        timestep = self._env.reset(key)
+        return timestep.observation, timestep
+
+    def step(self, key, state, action, params=None):
+        timestep = self._env.step(state, action)
+        return timestep.observation, timestep, timestep.reward, timestep.is_done(), {}
+
+    def observation_space(self, params):
+        return spaces.Box(
+            low=self._env.observation_space.minimum,
+            high=self._env.observation_space.maximum,
+            shape=(np.prod(self._env.observation_space.shape),),
+            dtype=self._env.observation_space.dtype,
+        )
+
+    def action_space(self, params):
+        return spaces.Discrete(
+            num_categories=self._env.action_space.maximum.item() + 1,
+        )
 
 
 class PessimisticMountainCarWrapper(GymnaxWrapper):
