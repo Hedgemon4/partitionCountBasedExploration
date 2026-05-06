@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import tyro
 import yaml
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple, Dict, Any, List, Optional
 from pathlib import Path
 import scipy.stats as stats
@@ -15,7 +15,7 @@ class Args:
     # The root directory containing all the run subfolders
     root_dir: Path = Path("data/mountaincar_static_epsilon")
     # Metrics to analyze
-    metric: str = "extrinsic_return_ema"
+    metric: str = "length_ema"
     intrinsic_metric: str = "intrinsic_return_ema"
     # Window size for smoothing the line plot
     smooth: int = 1
@@ -23,16 +23,46 @@ class Args:
     output_dir: Path = Path("graphs/mountaincar_static_epsilon/best_beta/")
 
     # --- LEGEND PARAMETERS ---
-    legend_vars: Optional[List[str]] = None
+    legend_vars: Optional[List[str]] = field(
+        default_factory=lambda: [
+            "beta",
+            "epsilon_end",
+            "epsilon_decay",
+            "initial_learning_rate",
+            "network.next_state_coef",
+        ]
+    )
+
+    # --- SCORING PARAMETERS ---
+    reverse: bool = False
+    """Controls how runs are ranked within each beta when picking the
+    "best" config. Mirrors the top_k_plotting_script semantics:
+      reverse = False  → smaller scores win  (e.g. MountainCar length_ema —
+                         shorter episodes are better)
+      reverse = True   → larger  scores win  (e.g. extrinsic_return_ema —
+                         higher return is better)  [default]
+    """
 
     # --- FILTER PARAMETERS ---
     beta_filter: Optional[float] = None  # Used if you only want to plot specific betas
-    activation: Optional[str] = "fta"
+    activation: Optional[str] = None
     max_grad_norm: Optional[float] = None
     epsilon_end: Optional[float] = None
     hidden_size: Optional[int] = None
     learnable_norm: Optional[bool] = None
     total_time_steps: Optional[float] = None
+    next_state_coef: Optional[float] = 0.0
+
+    # --- PLOT PARAMETERS ---
+    y_lim: Optional[Tuple[float, float]] = (100, 200)
+    """Y-axis limits for the extrinsic best-by-beta curves plot, as
+    (ymin, ymax). Leave unset to use matplotlib's autoscaling.
+    Example: --y-lim -200 0
+    """
+    intrinsic_y_lim: Optional[Tuple[float, float]] = (0, 80)
+    """Y-axis limits for the intrinsic best-by-beta curves plot, as
+    (ymin, ymax). Leave unset to use matplotlib's autoscaling.
+    """
 
 
 def moving_average(x: np.ndarray, w: int):
@@ -114,6 +144,11 @@ def matches_filters(folder_path: Path, args: Args) -> bool:
         and network_config.get("activation1", {}).get("type") != args.activation
     ):
         return False
+    if (
+        args.next_state_coef is not None
+        and network_config.get("next_state_coef") != args.next_state_coef
+    ):
+        return False
 
     return True
 
@@ -165,6 +200,7 @@ def plot_beta_curves(
     metric_title: str,
     output_path: Path,
     smooth: int,
+    y_lim: Optional[Tuple[float, float]] = None,
 ):
     """Helper function to plot learning curves for a specific metric."""
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -195,6 +231,8 @@ def plot_beta_curves(
         f"Best Configurations per Beta: {metric_title.replace('_', ' ').title()}"
     )
     ax.grid(True, linestyle="--", alpha=0.7)
+    if y_lim is not None:
+        ax.set_ylim(y_lim)
 
     fig.savefig(output_path, dpi=300, bbox_inches="tight")
     print(f"Saved {metric_title} curves to {output_path}")
@@ -224,8 +262,15 @@ def main(args: Args):
         if steps is None:
             continue
 
-        # Update dictionary if it's the first time seeing this beta or if score is better
-        if beta not in best_runs_by_beta or score > best_runs_by_beta[beta]["score"]:
+        # Update dictionary if it's the first time seeing this beta or if score is better.
+        # `reverse` mirrors top_k_plotting_script.py: reverse=True → larger is better,
+        # reverse=False → smaller is better (e.g. shorter MountainCar episodes).
+        def _is_better(new: float, old: float) -> bool:
+            return new > old if args.reverse else new < old
+
+        if beta not in best_runs_by_beta or _is_better(
+            score, best_runs_by_beta[beta]["score"]
+        ):
             legend_name = format_legend_label(folder, args.legend_vars)
 
             # Load intrinsic data simultaneously for the winning config
@@ -259,7 +304,13 @@ def main(args: Args):
     # ==========================================
     ext_out = args.output_dir / "best_by_beta_extrinsic_curves.png"
     handles, labels = plot_beta_curves(
-        best_runs_by_beta, sorted_betas, "ext_values", args.metric, ext_out, args.smooth
+        best_runs_by_beta,
+        sorted_betas,
+        "ext_values",
+        args.metric,
+        ext_out,
+        args.smooth,
+        y_lim=args.y_lim,
     )
 
     # Save a detached legend based on the extrinsic handles
@@ -287,6 +338,7 @@ def main(args: Args):
         args.intrinsic_metric,
         int_out,
         args.smooth,
+        y_lim=args.intrinsic_y_lim,
     )
 
     # ==========================================

@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import tyro
 import yaml
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Tuple, Optional, Any, Dict
 from pathlib import Path
 import re
@@ -51,8 +51,20 @@ class Args:
       max         - peak mean value across all timesteps
     """
 
+    # If you want to look at shorter episode length you need to have the data from largest to smallest value
+    reverse: bool = False
+    plot_extra: bool = False
+
     # --- LEGEND PARAMETERS ---
-    legend_vars: Optional[List[str]] = None
+    legend_vars: Optional[List[str]] = field(
+        default_factory=lambda: [
+            "beta",
+            "epsilon_end",
+            "epsilon_decay",
+            "initial_learning_rate",
+            "network.next_state_coef",
+        ]
+    )
 
     # --- FILTER PARAMETERS ---
     beta: Optional[float] = None
@@ -63,6 +75,17 @@ class Args:
     learnable_norm: Optional[bool] = None
     total_time_steps: Optional[float] = None
     next_state_coef: Optional[float] = None
+
+    # --- PLOT PARAMETERS ---
+    y_lim: Optional[Tuple[float, float]] = (100, 200)
+    """Y-axis limits for the extrinsic learning-curves plot, as (ymin, ymax).
+    Leave unset to use matplotlib's autoscaling. Example: --y-lim -200 0
+    """
+    intrinsic_y_lim: Optional[Tuple[float, float]] = (0, 80)
+    """Y-axis limits for the intrinsic-reward curves plot, as (ymin, ymax).
+    Leave unset to use matplotlib's autoscaling.
+    """
+
 
 # network.next-state-coef
 
@@ -213,7 +236,14 @@ def format_legend_label(folder_path: Path, legend_vars: Optional[List[str]]) -> 
     return " | ".join(label_parts)
 
 
-def plot_curves(results, metric_name, output_path, title, smooth_win):
+def plot_curves(
+    results,
+    metric_name,
+    output_path,
+    title,
+    smooth_win,
+    y_lim: Optional[Tuple[float, float]] = None,
+):
     fig, ax = plt.subplots(figsize=(10, 6))
     colors = plt.cm.get_cmap("tab20", len(results))
     for i, res in enumerate(results):
@@ -230,6 +260,8 @@ def plot_curves(results, metric_name, output_path, title, smooth_win):
     ax.set_ylabel(metric_name.replace("_", " ").title())
     ax.set_title(title)
     ax.grid(True, linestyle="--", alpha=0.7)
+    if y_lim is not None:
+        ax.set_ylim(y_lim)
     fig.savefig(output_path, dpi=300, bbox_inches="tight")
     return ax.get_legend_handles_labels()
 
@@ -256,7 +288,7 @@ def main(args: Args):
                     }
                 )
 
-    all_filtered.sort(key=lambda x: x["score"], reverse=False)
+    all_filtered.sort(key=lambda x: x["score"], reverse=args.reverse)
     top_results = all_filtered[: args.top_k]
     if not top_results:
         print("No matching folders.")
@@ -269,6 +301,7 @@ def main(args: Args):
         args.output_dir / "filtered_learning_curves.png",
         f"Learning Curves (Top {len(top_results)} by {args.score_metric})",
         args.smooth,
+        y_lim=args.y_lim,
     )
 
     # 2. Intrinsic Curves
@@ -284,6 +317,7 @@ def main(args: Args):
             args.output_dir / "intrinsic_reward_curves.png",
             f"Intrinsic Reward Curves (Top {len(top_results)} Runs)",
             args.smooth,
+            y_lim=args.intrinsic_y_lim,
         )
 
     # 3. Box Plot for Variance
@@ -324,15 +358,16 @@ def main(args: Args):
     # 5. Count histograms — one per top-k run and a combined comparison
     _plot_count_histograms(top_results, args)
 
-    # 6. Evolution plots — per-timestep snapshots of FTA counts,
-    #    observation counts, and grid-discrete representation.
-    #    Each run that has `counts/`, `observation_counts/`, and/or
-    #    `grid_counts/` subdirs contributes its own set of figures.
-    _plot_snapshot_evolution(top_results, args)
+    if args.plot_extra:
+        # 6. Evolution plots — per-timestep snapshots of FTA counts,
+        #    observation counts, and grid-discrete representation.
+        #    Each run that has `counts/`, `observation_counts/`, and/or
+        #    `grid_counts/` subdirs contributes its own set of figures.
+        _plot_snapshot_evolution(top_results, args)
 
-    # 7. Goal-reach plot — for MountainCar-style envs, count visits to the
-    #    goal region (position bins at or above goal_position) per top-k run.
-    _plot_goal_reach_counts(top_results, args)
+        # 7. Goal-reach plot — for MountainCar-style envs, count visits to the
+        #    goal region (position bins at or above goal_position) per top-k run.
+        _plot_goal_reach_counts(top_results, args)
 
 
 def _plot_count_histograms(top_results, args: Args):
