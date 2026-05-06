@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import tyro
 import yaml
+import warnings
 from dataclasses import dataclass, field
 from typing import Tuple, Dict, Any, List, Optional
 from pathlib import Path
@@ -34,6 +35,13 @@ class Args:
     )
 
     # --- SCORING PARAMETERS ---
+    score_metric: str = "last_10pct"
+    """How to rank runs when picking the best one per beta. Options:
+      last_10pct  - mean over the final 10%% of timesteps (original behaviour)
+      auc         - area under the curve (trapezoidal, normalised by x-range)
+      max         - peak mean value across all timesteps
+    """
+
     reverse: bool = False
     """Controls how runs are ranked within each beta when picking the
     "best" config. Mirrors the top_k_plotting_script semantics:
@@ -168,10 +176,56 @@ def get_beta_from_config(folder_path: Path) -> float:
         return None
 
 
+def compute_score(
+    values: np.ndarray, steps: np.ndarray, score_metric: str
+) -> Tuple[float, np.ndarray]:
+    """Return (scalar score for ranking, per-seed final values for the box plot).
+
+    Mirrors top_k_plotting_script.compute_score so both scripts agree on
+    what e.g. "auc" or "max" means.
+
+    Per-seed final values are always the last-10% mean so the variance box
+    plot remains consistent regardless of which ranking metric is chosen.
+
+    score_metric options
+    --------------------
+    last_10pct  – mean over the final 10% of timesteps (original behaviour)
+    auc         – area under the mean curve (trapezoidal), normalised by x-range
+    max         – peak of the mean curve across all timesteps
+    """
+    last_10_percent = max(1, int(values.shape[1] * 0.1))
+    final_values_per_seed = np.mean(values[:, -last_10_percent:], axis=1)
+
+    if score_metric == "last_10pct":
+        score = float(np.mean(final_values_per_seed))
+    elif score_metric == "auc":
+        # nanmean + NaN-strip handles seeds with missing early logs
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            mean_curve = np.nanmean(values, axis=0)
+        valid = ~np.isnan(mean_curve)
+        steps_v, curve_v = steps[valid], mean_curve[valid]
+        x_range = steps_v[-1] - steps_v[0] if valid.sum() > 1 else 0
+        score = (
+            float(np.trapezoid(curve_v, steps_v) / x_range)
+            if x_range > 0
+            else float(np.nanmean(mean_curve))
+        )
+    elif score_metric == "max":
+        mean_curve = np.nanmean(values, axis=0)
+        score = float(np.nanmax(mean_curve))
+    else:
+        raise ValueError(
+            f"Unknown score_metric '{score_metric}'. "
+            "Choose from: last_10pct, auc, max"
+        )
+    return score, final_values_per_seed
+
+
 def load_run_data(
-    folder_path: Path, metric_name: str
+    folder_path: Path, metric_name: str, score_metric: str = "last_10pct"
 ) -> Tuple[np.ndarray, np.ndarray, float, np.ndarray]:
-    """Loads metrics and calculates the final score."""
+    """Loads metrics and calculates the score for ranking + per-seed finals."""
     metrics_file = folder_path / "metrics.npz"
     if not metrics_file.exists():
         return None, None, None, None
@@ -184,11 +238,9 @@ def load_run_data(
         steps = data["env_step"][0]
         values = data[metric_name]
 
-        last_10_percent = max(1, int(values.shape[1] * 0.1))
-        final_values_per_seed = np.mean(values[:, -last_10_percent:], axis=1)
-        mean_score = np.mean(final_values_per_seed)
+        score, final_values_per_seed = compute_score(values, steps, score_metric)
 
-        return steps, values, mean_score, final_values_per_seed
+        return steps, values, score, final_values_per_seed
     except Exception as e:
         return None, None, None, None
 
@@ -258,7 +310,9 @@ def main(args: Args):
         if beta is None:
             continue
 
-        steps, values, score, final_seed_vals = load_run_data(folder, args.metric)
+        steps, values, score, final_seed_vals = load_run_data(
+            folder, args.metric, args.score_metric
+        )
         if steps is None:
             continue
 
