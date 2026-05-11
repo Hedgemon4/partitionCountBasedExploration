@@ -377,3 +377,123 @@ def make_network(input_size, num_actions, key, network_config):
             network_config=network_config,
         )
     raise ValueError(f"Unknown network config: {type(network_config)}")
+
+
+class QNetworkCNNCounts(QNetworkCounts):
+    cnn: list
+    next_state_head: list
+    next_state_coef: float
+
+    def __init__(self, input_size, num_actions, key, network_config):
+        # Need to change input size
+        keys = jax.random.split(key, 5)
+        super().__init__(512, num_actions, keys[0], network_config)
+
+        cnn = [
+            eqx.nn.Conv2d(
+                in_channels=input_size,
+                out_channels=32,
+                kernel_size=8,
+                stride=4,
+                padding="SAME",
+                key=keys[1],
+            ),
+            eqx.nn.Lambda(jax.nn.relu),
+            eqx.nn.Conv2d(
+                in_channels=32,
+                out_channels=64,
+                kernel_size=4,
+                stride=2,
+                padding="SAME",
+                key=keys[2],
+            ),
+            eqx.nn.Lambda(jax.nn.relu),
+            eqx.nn.Conv2d(
+                in_channels=64,
+                out_channels=64,
+                kernel_size=3,
+                stride=1,
+                padding="SAME",
+                key=keys[3],
+            ),
+            eqx.nn.Lambda(jax.nn.relu),
+            eqx.nn.Lambda(jnp.ravel),
+        ]
+        blocks = network_config.blocks
+
+        discrete_representation_block = blocks[network_config.count_layer - 1]
+        activation = make_activation(discrete_representation_block.activation)
+
+        next_state_head = [
+            eqx.nn.Linear(
+                in_features=blocks[-1].hidden_size,
+                out_features=input_size,
+                key=keys[4],
+            ),
+            activation,
+        ]
+
+    def __call__(self, x):
+        # Explicitly indicate counts are not trainable
+        jax.lax.stop_gradient(self.counts)
+        # Change from (batch, channels, height, width) to (batch, height, width, channels) for eqx.nn.Conv2d
+        x = jnp.transpose(x, (0, 2, 3, 1))
+
+        for layer in self.cnn:
+            x = layer(x)
+
+        for i, block in enumerate(self.blocks):
+            for layer in block:
+                x = layer(x)
+            # Depending on which layer is being used for counts, select the appropriate activation for the discrete representation
+            if i + 1 == self.count_layer:
+                discrete_activation = x
+
+        shared_output = x
+
+        for layer in self.value_head:
+            x = layer(x)
+
+        predicted_next_state = shared_output
+        for layer in self.next_state_head:
+            predicted_next_state = layer(predicted_next_state)
+
+        discrete_representation = self._discrete_representation(discrete_activation)
+
+        return x, discrete_representation, predicted_next_state
+
+    def get_discrete_representation(self, states):
+        x = jnp.transpose(states, (0, 2, 3, 1))
+        for layer in self.cnn:
+            x = layer(x)
+
+        for i, block in enumerate(self.blocks):
+            for layer in block:
+                x = layer(x)
+            # Depending on which layer is being used for counts, select the appropriate activation for the discrete representation
+            if i + 1 == self.count_layer:
+                discrete_activation = x
+                break
+
+        return self._discrete_representation(jax.lax.stop_gradient(discrete_activation))
+
+    def loss(self, mini_batch, targets):
+        ### This loss uses next discrete state prediction rather than next state prediction
+        q_values, discrere_representation, predicted_next_discrete_representation = jax.vmap(self)(mini_batch.state)
+        index = jnp.arange(q_values.shape[0])
+        selected_q_values = q_values[index, mini_batch.action]
+
+        q_loss = 0.5 * jnp.mean((selected_q_values - targets) ** 2)
+
+        next_state_loss = 0.5 * jnp.mean(
+            (predicted_next_discrete_representation - discrere_representation) ** 2
+        )
+
+        total_loss = q_loss + self.next_state_coef * next_state_loss
+
+        losses = {
+            "total": total_loss,
+            "q": q_loss,
+            "next_state": next_state_loss,
+        }
+        return total_loss, (selected_q_values, losses)
