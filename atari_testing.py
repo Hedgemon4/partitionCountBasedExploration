@@ -9,6 +9,4 @@ test_env = AtariVectorEnv(
     frameskip=4,
 )
 
-item = test_env.reset()
-
-print(item[0].shape)
+test_env.xla()

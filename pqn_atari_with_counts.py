@@ -12,9 +12,11 @@ import tyro
 import gymnax
 import chex
 import yaml
+from gymnasium.vector import AutoresetMode
 from jax import Array
 
 import configs.defaults as configs
+from ale_py.vector_env import AtariVectorEnv
 from exploration import epsilon_greedy
 from helper_functions import update_ema
 from netwoks import make_network
@@ -23,6 +25,7 @@ from wrappers import (
     FlattenObservationWrapper,
     LogWrapper,
     PessimisticMountainCarWrapper,
+    ALEGymnaxWrapperXLA,
 )
 
 """
@@ -63,23 +66,42 @@ class IntrinsicRewardData:
 
 
 def make_env(args, episode_length):
+    # environment_name = args.environment
+    # env, env_params = gymnax.make(environment_name)
+    # if episode_length is not None:
+    #     env_params = env_params.replace(max_steps_in_episode=episode_length)
+    # env = FlattenObservationWrapper(env)
+    # if environment_name == "MountainCar-v0" and args.pessimistic:
+    #     print("Using pessimistic wrapper for MountainCar")
+    #     env = PessimisticMountainCarWrapper(env)
+    # env = LogWrapper(env)
+    # vmap_reset = lambda num_envs: lambda random_key: jax.vmap(
+    #     env.reset, in_axes=(0, None)
+    # )(jax.random.split(random_key, num_envs), env_params)
+    # vmap_step = lambda num_envs: lambda random_key, state, action: jax.vmap(
+    #     env.step, in_axes=(0, 0, 0, None)
+    # )(jax.random.split(random_key, num_envs), state, action, env_params)
+    #
+    # return env, vmap_reset, vmap_step, env_params
     environment_name = args.environment
-    env, env_params = gymnax.make(environment_name)
-    if episode_length is not None:
-        env_params = env_params.replace(max_steps_in_episode=episode_length)
-    env = FlattenObservationWrapper(env)
-    if environment_name == "MountainCar-v0" and args.pessimistic:
-        print("Using pessimistic wrapper for MountainCar")
-        env = PessimisticMountainCarWrapper(env)
-    env = LogWrapper(env)
-    vmap_reset = lambda num_envs: lambda random_key: jax.vmap(
-        env.reset, in_axes=(0, None)
-    )(jax.random.split(random_key, num_envs), env_params)
-    vmap_step = lambda num_envs: lambda random_key, state, action: jax.vmap(
-        env.step, in_axes=(0, 0, 0, None)
-    )(jax.random.split(random_key, num_envs), state, action, env_params)
-
-    return env, vmap_reset, vmap_step, env_params
+    # Check to see if the xla interface is available
+    try:
+        test_env = AtariVectorEnv(
+            environment_name,
+            num_envs=1,
+            autoreset_mode=AutoresetMode.SAME_STEP,
+            stack_num=args.framestack,
+        )
+        test_env.xla()
+        xla_available = True
+    except (AttributeError, RuntimeError):
+        xla_available = False
+    ### TODO: Finish make env
+    if xla_available:
+        print("Using ale xla interface")
+        wrapper = ALEGymnaxWrapperXLA
+    elif not args.force_xla:
+        print("Using ale default interface")
 
 
 def make_run(args):

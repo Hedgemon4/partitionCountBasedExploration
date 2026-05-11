@@ -349,36 +349,6 @@ class QNetworkCountsWithNextStatePrediction(QNetworkCounts):
         return total_loss, (selected_q_values, losses)
 
 
-def make_network(input_size, num_actions, key, network_config):
-    """Build the network corresponding to `network_config`.
-
-    Mirrors `make_activation` — dispatches on the config dataclass type so the
-    caller doesn't need to hardcode a class.
-    """
-    if isinstance(network_config, (QNetworkConfig, QNetworkCartpoleConfig)):
-        return QNetwork(
-            input_size=input_size,
-            num_actions=num_actions,
-            key=key,
-            network_config=network_config,
-        )
-    elif isinstance(network_config, QNetworkCountsWithNextStatePredictionConfig):
-        return QNetworkCountsWithNextStatePrediction(
-            input_size=input_size,
-            num_actions=num_actions,
-            key=key,
-            network_config=network_config,
-        )
-    elif isinstance(network_config, QNetworkCountsConfig):
-        return QNetworkCounts(
-            input_size=input_size,
-            num_actions=num_actions,
-            key=key,
-            network_config=network_config,
-        )
-    raise ValueError(f"Unknown network config: {type(network_config)}")
-
-
 class QNetworkCNNCounts(QNetworkCounts):
     cnn: list
     next_state_head: list
@@ -479,7 +449,9 @@ class QNetworkCNNCounts(QNetworkCounts):
 
     def loss(self, mini_batch, targets):
         ### This loss uses next discrete state prediction rather than next state prediction
-        q_values, discrere_representation, predicted_next_discrete_representation = jax.vmap(self)(mini_batch.state)
+        q_values, discrere_representation, predicted_next_discrete_representation = (
+            jax.vmap(self)(mini_batch.state)
+        )
         index = jnp.arange(q_values.shape[0])
         selected_q_values = q_values[index, mini_batch.action]
 
@@ -497,3 +469,40 @@ class QNetworkCNNCounts(QNetworkCounts):
             "next_state": next_state_loss,
         }
         return total_loss, (selected_q_values, losses)
+
+
+def make_network(input_size, num_actions, key, network_config):
+    """Build the network corresponding to `network_config`.
+
+    Mirrors `make_activation` — dispatches on the config dataclass type so the
+    caller doesn't need to hardcode a class.
+    """
+    if isinstance(network_config, (QNetworkConfig, QNetworkCartpoleConfig)):
+        return QNetwork(
+            input_size=input_size,
+            num_actions=num_actions,
+            key=key,
+            network_config=network_config,
+        )
+    elif isinstance(network_config, QNetworkCountsWithNextStatePredictionConfig):
+        return QNetworkCountsWithNextStatePrediction(
+            input_size=input_size,
+            num_actions=num_actions,
+            key=key,
+            network_config=network_config,
+        )
+    elif isinstance(network_config, QNetworkCountsConfig):
+        return QNetworkCounts(
+            input_size=input_size,
+            num_actions=num_actions,
+            key=key,
+            network_config=network_config,
+        )
+    elif isinstance(network_config, QNetworkCNNCounts):
+        return QNetworkCNNCounts(
+            input_size=input_size,
+            num_actions=num_actions,
+            key=key,
+            network_config=network_config,
+        )
+    raise ValueError(f"Unknown network config: {type(network_config)}")

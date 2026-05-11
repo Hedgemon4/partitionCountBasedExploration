@@ -56,10 +56,21 @@ class QNetworkCountsWithNextStatePrediction(BaseNetworkConfig):
     )
 
 
+@dataclasses.dataclass(frozen=True)
+class QNetworkCNNCounts(BaseNetworkConfig):
+    type: Literal["q_network_cnn_counts"] = "q_network_cnn_counts"
+    count_layer: int = 1
+    next_state_coef: float = 1.0
+    blocks: list[Block] = dataclasses.field(
+        default_factory=lambda: [FTABlock(), Block()]
+    )
+
+
 NetworkConfig = Union[
     QNetwork,
     QNetworkCartpole,
     QNetworkCounts,
     QNetworkCountsWithNextStatePrediction,
+    QNetworkCNNCounts,
     BaseNetworkConfig,
 ]
