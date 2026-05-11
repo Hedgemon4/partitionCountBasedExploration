@@ -286,3 +286,40 @@ class MountainCarWithIntrinsicRewardsAndStatePredictionConfig(BaseConfig):
 
     # Network Activation Configs
     network: NetworkConfig = QNetworkCountsWithNextStatePrediction()
+
+@chex.dataclass(frozen=True)
+class AtariConfig(BaseConfig):
+    # Experiment Configs
+    output_folder_name: str = "atari_testing"
+
+    # Algorithm Configs
+    initial_learning_rate: float = 0.001
+    final_learning_rate: float = 0.001
+    num_epochs: int = 8
+    num_minibatches: int = 16
+    gamma: float = 0.99
+    lambda_returns: bool = True
+    lam: float = 0.95
+    max_grad_norm: float = 100.0
+    reward_scale: float = 1.0
+    sarsa_returns: bool = True
+    pessimistic: bool = False
+
+    # Env Configs
+    environment: str = "MountainCar-v0"
+    episode_length: int = 200
+    num_environments: int = 32
+    num_steps: int = 64
+    total_time_steps: float = 5e5
+
+    # Exploration Configs
+    beta: float = 0.5
+    epsilon_start: float = 1.0
+    epsilon_end: float = 0.01
+    epsilon_decay: float = 0.05
+
+    # Env timesteps between each count snapshot (0 = save only at end of training)
+    count_save_timestep_interval: float = 5e4
+
+    # Network Activation Configs
+    network: NetworkConfig = QNetworkCountsWithNextStatePrediction()
