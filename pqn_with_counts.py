@@ -18,6 +18,7 @@ import configs.defaults as configs
 from exploration import epsilon_greedy
 from helper_functions import update_ema
 from netwoks import make_network
+from env_registery import make
 from observations_counting import ObservationCounts
 from wrappers import (
     FlattenObservationWrapper,
@@ -64,7 +65,7 @@ class IntrinsicRewardData:
 
 def make_env(args, episode_length):
     environment_name = args.environment
-    env, env_params = gymnax.make(environment_name)
+    env, env_params = make(environment_name)
     if episode_length is not None:
         env_params = env_params.replace(max_steps_in_episode=episode_length)
     env = FlattenObservationWrapper(env)
