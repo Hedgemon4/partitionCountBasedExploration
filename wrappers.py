@@ -179,9 +179,9 @@ class ALEGymnaxWrapperXLA:
         done = term | trunc
 
         next_state = GymVecEnvState(handle=handle)
-        info["truncated"] = trunc[0]
+        info["truncated"] = trunc
 
-        return obs[0], next_state, rew[0], done[0], info
+        return obs, next_state, rew, done, info
 
     def observation_space(self, params: Optional[environment.EnvParams] = None):
         obs_space = cast(Any, self._env.observation_space)
@@ -202,19 +202,20 @@ class ALEGymnaxWrapperXLA:
 class ALEGymnaxWrapperStandard:
     """Standard ale_py Atari environment wrapper with JAX compatibility."""
 
-    def __init__(self, env_name, seed, **kwargs):
+    def __init__(self, env_name, num_envs, seed, **kwargs):
         self._env = AtariVectorEnv(
-            env_name, num_envs=1, autoreset_mode=AutoresetMode.SAME_STEP, **kwargs
+            env_name, num_envs=num_envs, autoreset_mode=AutoresetMode.SAME_STEP, **kwargs
         )
         self._env.reset(seed=seed)
         self.init_reset_seed = seed
+        self.num_envs = num_envs
 
     def reset(
         self, key: chex.PRNGKey, params: Optional[environment.EnvParams] = None
     ) -> Tuple[chex.Array, GymVecEnvState]:
         obs, _ = self._env.reset(seed=self.init_reset_seed)
         state = GymVecEnvState(handle=None)
-        return obs[0], state
+        return obs, state
 
     def step(
         self,
@@ -235,10 +236,10 @@ class ALEGymnaxWrapperStandard:
 
         next_state = GymVecEnvState(handle=None)
         info = {}  # Empty info dict for standard ale_py
-        info["truncated"] = trunc[0]
-        obs_out = cast(Any, obs)[0]
-        rew_out = cast(Any, rew)[0]
-        done_out = cast(Any, done)[0]
+        info["truncated"] = trunc
+        obs_out = cast(Any, obs)
+        rew_out = cast(Any, rew)
+        done_out = cast(Any, done)
 
         return obs_out, next_state, rew_out, done_out, info
 
@@ -247,24 +248,24 @@ class ALEGymnaxWrapperStandard:
     ) -> Tuple[chex.Array, chex.Array, chex.Array, chex.Array]:
         """Wrapped callback for use inside JIT-compiled functions."""
         obs_space = cast(Any, self._env.observation_space)
-        obs_shape = (1, *obs_space.shape[1:])
+        obs_shape = obs_space.shape
 
         obs, rew, term, trunc = jax.pure_callback(
             lambda a: self._step_callback_impl(a),
             (
                 jax.ShapeDtypeStruct(obs_shape, dtype=np.uint8),
-                jax.ShapeDtypeStruct((1,), dtype=np.float32),
-                jax.ShapeDtypeStruct((1,), dtype=np.bool_),
-                jax.ShapeDtypeStruct((1,), dtype=np.bool_),
+                jax.ShapeDtypeStruct((self.num_envs,), dtype=np.float32),
+                jax.ShapeDtypeStruct((self.num_envs,), dtype=np.bool_),
+                jax.ShapeDtypeStruct((self.num_envs,), dtype=np.bool_),
             ),
             action,
         )
 
         # Convert to JAX arrays if needed
-        obs = jnp.asarray(obs)
-        rew = jnp.asarray(rew, dtype=jnp.float32)
-        term = jnp.asarray(term, dtype=jnp.bool_)
-        trunc = jnp.asarray(trunc, dtype=jnp.bool_)
+        # obs = jnp.asarray(obs)
+        # rew = jnp.asarray(rew, dtype=jnp.float32)
+        # term = jnp.asarray(term, dtype=jnp.bool_)
+        # trunc = jnp.asarray(trunc, dtype=jnp.bool_)
 
         return obs, rew, term, trunc
 

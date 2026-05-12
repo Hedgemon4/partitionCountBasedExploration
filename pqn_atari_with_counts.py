@@ -9,7 +9,6 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 import tyro
-import gymnax
 import chex
 import yaml
 from gymnasium.vector import AutoresetMode
@@ -21,11 +20,9 @@ from exploration import epsilon_greedy
 from helper_functions import update_ema
 from netwoks import make_network
 from observations_counting import ObservationCounts
-from wrappers import (
-    FlattenObservationWrapper,
+from wrappers import(
     LogWrapper,
-    PessimisticMountainCarWrapper,
-    ALEGymnaxWrapperXLA,
+    ALEGymnaxWrapperXLA, ALEGymnaxWrapperStandard,
 )
 
 """
@@ -65,25 +62,9 @@ class IntrinsicRewardData:
     returned_intrinsic_return: Array
 
 
-def make_env(args, episode_length):
-    # environment_name = args.environment
-    # env, env_params = gymnax.make(environment_name)
-    # if episode_length is not None:
-    #     env_params = env_params.replace(max_steps_in_episode=episode_length)
-    # env = FlattenObservationWrapper(env)
-    # if environment_name == "MountainCar-v0" and args.pessimistic:
-    #     print("Using pessimistic wrapper for MountainCar")
-    #     env = PessimisticMountainCarWrapper(env)
-    # env = LogWrapper(env)
-    # vmap_reset = lambda num_envs: lambda random_key: jax.vmap(
-    #     env.reset, in_axes=(0, None)
-    # )(jax.random.split(random_key, num_envs), env_params)
-    # vmap_step = lambda num_envs: lambda random_key, state, action: jax.vmap(
-    #     env.step, in_axes=(0, 0, 0, None)
-    # )(jax.random.split(random_key, num_envs), state, action, env_params)
-    #
-    # return env, vmap_reset, vmap_step, env_params
+def make_env(args):
     environment_name = args.environment
+
     # Check to see if the xla interface is available
     try:
         test_env = AtariVectorEnv(
@@ -93,15 +74,26 @@ def make_env(args, episode_length):
             stack_num=args.framestack,
         )
         test_env.xla()
+        del test_env
         xla_available = True
     except (AttributeError, RuntimeError):
         xla_available = False
-    ### TODO: Finish make env
     if xla_available:
         print("Using ale xla interface")
         wrapper = ALEGymnaxWrapperXLA
     elif not args.force_xla:
         print("Using ale default interface")
+        wrapper = ALEGymnaxWrapperStandard
+    else:
+        raise ValueError("XLA interface not available, but force_xla is set to True")
+    env, env_params = wrapper(
+        env_name = environment_name,
+        num_envs=args.num_environments,
+        seed=args.seed,
+        framestack=args.framestack,
+    )
+    env = LogWrapper(env)
+    return env, env_params
 
 
 def make_run(args):
@@ -109,7 +101,7 @@ def make_run(args):
 
     # Environment Setup
     episode_length = getattr(args, "episode_length", None)
-    env, vmap_reset, vmap_step, env_params = make_env(args, episode_length)
+    env, env_params = make_env(args, episode_length)
 
     input_size = int(env.observation_space(env_params).shape[0])
     num_actions = int(env.action_space(env_params).n)
@@ -549,23 +541,15 @@ def make_run(args):
 
 ConfigOptions = Union[
     Annotated[
-        configs.CartPoleWithIntrinsicRewardsConfig,
-        tyro.conf.subcommand(name="cartpole"),
-    ],
-    Annotated[
-        configs.MountainCarWithIntrinsicRewardsConfig,
-        tyro.conf.subcommand(name="mountaincar"),
-    ],
-    Annotated[
-        configs.MountainCarWithIntrinsicRewardsAndStatePredictionConfig,
-        tyro.conf.subcommand(name="mountaincar_states"),
-    ],
+        configs.AtariConfig,
+        tyro.conf.subcommand(name="pong"),
+    ]
 ]
 
 if __name__ == "__main__":
     args = tyro.cli(
         ConfigOptions,
-        default=configs.MountainCarWithIntrinsicRewardsConfig(),
+        default=configs.AtariConfig(),
         config=(tyro.conf.CascadeSubcommandArgs,),
     )
 

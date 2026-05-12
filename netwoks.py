@@ -358,8 +358,9 @@ class QNetworkCNNCounts(QNetworkCounts):
         # Need to change input size
         keys = jax.random.split(key, 5)
         super().__init__(512, num_actions, keys[0], network_config)
+        self.next_state_coef = network_config.next_state_coef
 
-        cnn = [
+        self.cnn = [
             eqx.nn.Conv2d(
                 in_channels=input_size,
                 out_channels=32,
@@ -394,7 +395,7 @@ class QNetworkCNNCounts(QNetworkCounts):
         discrete_representation_block = blocks[network_config.count_layer - 1]
         activation = make_activation(discrete_representation_block.activation)
 
-        next_state_head = [
+        self.next_state_head = [
             eqx.nn.Linear(
                 in_features=blocks[-1].hidden_size,
                 out_features=input_size,
