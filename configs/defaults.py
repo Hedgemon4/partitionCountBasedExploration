@@ -292,6 +292,7 @@ class MountainCarWithIntrinsicRewardsAndStatePredictionConfig(BaseConfig):
 class PQNCraftaxConfig(BaseConfig):
     # Experiment Configs
     output_folder_name: str = "pqn_craftax"
+    log_observations: bool = False
 
     # Algorithm Configs
     initial_learning_rate: float = 0.004
