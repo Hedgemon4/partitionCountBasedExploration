@@ -314,6 +314,7 @@ class PQNCraftaxConfig(BaseConfig):
     total_time_steps: float = 5e5
 
     # Exploration Configs
+    beta: float = 0.5
     epsilon_start: float = 1.0
     epsilon_end: float = 0.01
     epsilon_decay: float = 0.2
