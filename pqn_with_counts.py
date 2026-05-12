@@ -539,6 +539,10 @@ ConfigOptions = Union[
         configs.MountainCarWithIntrinsicRewardsAndStatePredictionConfig,
         tyro.conf.subcommand(name="mountaincar_states"),
     ],
+    Annotated[
+        configs.PQNCraftaxConfig,
+        tyro.conf.subcommand(name='craftax')
+    ]
 ]
 
 if __name__ == "__main__":
