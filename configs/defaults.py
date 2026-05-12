@@ -286,3 +286,36 @@ class MountainCarWithIntrinsicRewardsAndStatePredictionConfig(BaseConfig):
 
     # Network Activation Configs
     network: NetworkConfig = QNetworkCountsWithNextStatePrediction()
+
+
+@chex.dataclass(frozen=True)
+class PQNCraftaxConfig(BaseConfig):
+    # Experiment Configs
+    output_folder_name: str = "pqn_craftax"
+
+    # Algorithm Configs
+    initial_learning_rate: float = 0.004
+    final_learning_rate: float = 0.004
+    num_epochs: int = 8
+    num_minibatches: int = 16
+    gamma: float = 0.99
+    lambda_returns: bool = True
+    lam: float = 0.95
+    max_grad_norm: float = 100.0
+    reward_scale: float = 1.0
+    sarsa_returns: bool = True
+
+    # Env Configs
+    environment: str = "Craftax-Symbolic-v1"
+    episode_length: int = None
+    num_environments: int = 32
+    num_steps: int = 64
+    total_time_steps: float = 5e5
+
+    # Exploration Configs
+    epsilon_start: float = 1.0
+    epsilon_end: float = 0.01
+    epsilon_decay: float = 0.2
+
+    # Network Activation Configs
+    network: NetworkConfig = QNetworkCounts()
