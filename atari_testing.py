@@ -16,16 +16,20 @@ env_name = "freeway"
 num_envs = 8
 seed = 0
 
-env = ALEGymnaxWrapperStandard(env_name, num_envs=num_envs, seed=seed)
+# env = ALEGymnaxWrapperStandard(env_name, num_envs=num_envs, seed=seed)
+env = test_env
 
 rng = jax.random.PRNGKey(0)
 keys = jax.random.split(rng, 3)
-obs, env_state = env.reset(keys[0])
+obs, env_state = env.reset()
+
 
 def step_env(carry, _):
     rng, state = carry
     key, subkey = jax.random.split(rng)
-    obs, state, reward, done, info = env.step(key, env_state, jnp.array([0, 0, 0, 0, 0, 0, 0, 0]))
+    obs, state, reward, done, info = env.step(
+        key, env_state, jnp.array([0, 0, 0, 0, 0, 0, 0, 0])
+    )
     next_carry = (subkey, state)
     return next_carry, (obs, reward, done)
 

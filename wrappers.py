@@ -141,8 +141,13 @@ class PessimisticMountainCarWrapper(GymnaxWrapper):
 
 
 @chex.dataclass(frozen=True)
-class GymVecEnvState:
-    handle: Any
+class LogEnvStateAtari:
+    handle: jax.Array
+    episode_returns: jax.Array
+    episode_lengths: jax.Array
+    returned_episode_returns: jax.Array
+    returned_episode_lengths: jax.Array
+    timestep: jax.Array
 
 
 class ALEGymnaxWrapperXLA:
@@ -153,35 +158,66 @@ class ALEGymnaxWrapperXLA:
             env_name,
             num_envs=num_envs,
             autoreset_mode=AutoresetMode.SAME_STEP,
-            **kwargs
+            **kwargs,
         )
         self.init_handle, self._reset, self._step = self._env.xla()
         self.init_reset_seed = seed
+        self.num_envs = num_envs
 
     def reset(
         self, key: chex.PRNGKey, params: Optional[environment.EnvParams] = None
-    ) -> Tuple[chex.Array, GymVecEnvState]:
+    ) -> Tuple[chex.Array, LogEnvStateAtari]:
         handle, (obs, _) = self._reset(self.init_handle, seed=self.init_reset_seed)
-        state = GymVecEnvState(handle=handle)
-        return obs[0], state
+        env_state = LogEnvStateAtari(
+            handle=jnp.array(handle),
+            episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            episode_lengths=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            returned_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            returned_episode_lengths=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            timestep=jnp.zeros(self.num_envs, dtype=jnp.float32),
+        )
+        return obs, env_state
 
+    @partial(jax.jit, static_argnums=(0,))
     def step(
         self,
         key: chex.PRNGKey,
-        state: GymVecEnvState,
+        state: LogEnvStateAtari,
         action: chex.Array,
         params: Optional[environment.EnvParams] = None,
-    ) -> Tuple[chex.Array, GymVecEnvState, chex.Array, chex.Array, dict[str, Any]]:
+    ) -> Tuple[chex.Array, jax.Array, chex.Array, chex.Array, dict[str, Any]]:
         if action.ndim == 0:
             action = jnp.expand_dims(action, axis=0)  # envpool always expects batch dim
-        handle = state.handle
-        handle, (obs, rew, term, trunc, info) = self._step(handle, action)
+
+        handle, (obs, reward, term, trunc, info) = self._step(state.handle, action)
         done = term | trunc
 
-        next_state = GymVecEnvState(handle=handle)
-        info["truncated"] = trunc
+        new_episode_return = state.episode_returns + reward
+        new_episode_length = state.episode_lengths + 1
 
-        return obs, next_state, rew, done, info
+        next_state = LogEnvStateAtari(
+            handle=handle,
+            episode_returns=(new_episode_return) * (1 - done),
+            episode_lengths=(new_episode_length) * (1 - done),
+            returned_episode_returns=jnp.where(
+                done,
+                new_episode_return,
+                state.returned_episode_returns,
+            ),
+            returned_episode_lengths=jnp.where(
+                done,
+                new_episode_length,
+                state.returned_episode_lengths,
+            ),
+            timestep=state.timestep + 1,
+        )
+
+        info["returned_episode_returns"] = state.returned_episode_returns
+        info["returned_episode_lengths"] = state.returned_episode_lengths
+        info["timestep"] = state.timestep
+        info["returned_episode"] = done
+
+        return obs, next_state, reward, done, info
 
     def observation_space(self, params: Optional[environment.EnvParams] = None):
         obs_space = cast(Any, self._env.observation_space)
@@ -204,7 +240,10 @@ class ALEGymnaxWrapperStandard:
 
     def __init__(self, env_name, num_envs, seed, **kwargs):
         self._env = AtariVectorEnv(
-            env_name, num_envs=num_envs, autoreset_mode=AutoresetMode.SAME_STEP, **kwargs
+            env_name,
+            num_envs=num_envs,
+            autoreset_mode=AutoresetMode.SAME_STEP,
+            **kwargs,
         )
         self._env.reset(seed=seed)
         self.init_reset_seed = seed
@@ -212,36 +251,63 @@ class ALEGymnaxWrapperStandard:
 
     def reset(
         self, key: chex.PRNGKey, params: Optional[environment.EnvParams] = None
-    ) -> Tuple[chex.Array, GymVecEnvState]:
+    ) -> Tuple[chex.Array, LogEnvStateAtari]:
         obs, _ = self._env.reset(seed=self.init_reset_seed)
-        state = GymVecEnvState(handle=None)
-        return obs, state
+        print(f"Num envs: {self.num_envs}")
+        env_state = LogEnvStateAtari(
+            handle=None,
+            episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            episode_lengths=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            returned_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            returned_episode_lengths=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            timestep=jnp.zeros(self.num_envs, dtype=jnp.float32),
+        )
+        return obs, env_state
 
     def step(
         self,
         key: chex.PRNGKey,
-        state: GymVecEnvState,
+        state: LogEnvStateAtari,
         action: chex.Array,
         params: Optional[environment.EnvParams] = None,
-    ) -> Tuple[chex.Array, GymVecEnvState, chex.Array, chex.Array, dict[str, Any]]:
+    ) -> Tuple[chex.Array, LogEnvStateAtari, chex.Array, chex.Array, dict[str, Any]]:
         if action.ndim == 0:
             action = jnp.expand_dims(action, axis=0)
 
         # Use pure_callback to call non-JAX ale_py from inside JIT
-        obs, rew, term, trunc = self._step_callback(action)
-        rew = jnp.atleast_1d(jnp.asarray(rew, dtype=jnp.float32))
-        term = jnp.atleast_1d(jnp.asarray(term, dtype=jnp.bool_))
-        trunc = jnp.atleast_1d(jnp.asarray(trunc, dtype=jnp.bool_))
+        obs, reward, term, trunc = self._step_callback(action)
+        rew = jnp.atleast_1d(jnp.asarray(reward, dtype=jnp.float32))
+        term = jnp.atleast_1d(jnp.asarray(term, dtype=jnp.float32))
+        trunc = jnp.atleast_1d(jnp.asarray(trunc, dtype=jnp.float32))
         done = jnp.logical_or(term, trunc)
 
-        next_state = GymVecEnvState(handle=None)
-        info = {}  # Empty info dict for standard ale_py
-        info["truncated"] = trunc
-        obs_out = cast(Any, obs)
-        rew_out = cast(Any, rew)
-        done_out = cast(Any, done)
+        new_episode_return = state.episode_returns + reward
+        new_episode_length = state.episode_lengths + 1
 
-        return obs_out, next_state, rew_out, done_out, info
+        next_state = LogEnvStateAtari(
+            handle=None,
+            episode_returns=(new_episode_return) * (1 - done),
+            episode_lengths=(new_episode_length) * (1 - done),
+            returned_episode_returns=jnp.where(
+                done,
+                new_episode_return,
+                state.returned_episode_returns,
+            ),
+            returned_episode_lengths=jnp.where(
+                done,
+                new_episode_length,
+                state.returned_episode_lengths,
+            ),
+            timestep=state.timestep + 1,
+        )
+
+        info = {}  # Empty info dict for standard ale_py
+        info["returned_episode_returns"] = state.returned_episode_returns
+        info["returned_episode_lengths"] = state.returned_episode_lengths
+        info["timestep"] = state.timestep
+        info["returned_episode"] = done
+
+        return obs, next_state, reward, done, info
 
     def _step_callback(
         self, action: chex.Array
@@ -255,17 +321,11 @@ class ALEGymnaxWrapperStandard:
             (
                 jax.ShapeDtypeStruct(obs_shape, dtype=np.uint8),
                 jax.ShapeDtypeStruct((self.num_envs,), dtype=np.float32),
-                jax.ShapeDtypeStruct((self.num_envs,), dtype=np.bool_),
-                jax.ShapeDtypeStruct((self.num_envs,), dtype=np.bool_),
+                jax.ShapeDtypeStruct((self.num_envs,), dtype=np.float32),
+                jax.ShapeDtypeStruct((self.num_envs,), dtype=np.float32),
             ),
             action,
         )
-
-        # Convert to JAX arrays if needed
-        # obs = jnp.asarray(obs)
-        # rew = jnp.asarray(rew, dtype=jnp.float32)
-        # term = jnp.asarray(term, dtype=jnp.bool_)
-        # trunc = jnp.asarray(trunc, dtype=jnp.bool_)
 
         return obs, rew, term, trunc
 

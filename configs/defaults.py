@@ -9,6 +9,7 @@ from configs.networks import (
     QNetwork,
     QNetworkCartpole,
     QNetworkCountsWithNextStatePrediction,
+    QNetworkCNNCountsConfig,
 )
 
 
@@ -323,4 +324,4 @@ class AtariConfig(BaseConfig):
     count_save_timestep_interval: float = 5e5
 
     # Network Activation Configs
-    network: NetworkConfig = QNetworkCountsWithNextStatePrediction()
+    network: NetworkConfig = QNetworkCNNCountsConfig()

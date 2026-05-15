@@ -20,9 +20,9 @@ from exploration import epsilon_greedy
 from helper_functions import update_ema
 from netwoks import make_network
 from observations_counting import ObservationCounts
-from wrappers import(
-    LogWrapper,
-    ALEGymnaxWrapperXLA, ALEGymnaxWrapperStandard,
+from wrappers import (
+    ALEGymnaxWrapperXLA,
+    ALEGymnaxWrapperStandard,
 )
 
 """
@@ -86,13 +86,15 @@ def make_env(args):
         wrapper = ALEGymnaxWrapperStandard
     else:
         raise ValueError("XLA interface not available, but force_xla is set to True")
-    env, env_params = wrapper(
-        env_name = environment_name,
-        num_envs=args.num_environments,
-        seed=args.seed,
-        framestack=args.framestack,
+    env, env_params = (
+        wrapper(
+            env_name=environment_name,
+            num_envs=args.num_environments,
+            seed=args.seed,
+            stack_num=args.framestack,
+        ),
+        None,
     )
-    env = LogWrapper(env)
     return env, env_params
 
 
@@ -100,8 +102,7 @@ def make_run(args):
     num_updates = int(args.total_time_steps // args.num_environments // args.num_steps)
 
     # Environment Setup
-    episode_length = getattr(args, "episode_length", None)
-    env, env_params = make_env(args, episode_length)
+    env, env_params = make_env(args)
 
     input_size = int(env.observation_space(env_params).shape[0])
     num_actions = int(env.action_space(env_params).n)
@@ -142,7 +143,7 @@ def make_run(args):
 
         # Reset Environment
         key, subkey = jax.random.split(key, 2)
-        start_state, start_env_state = vmap_reset(args.num_environments)(subkey)
+        start_state, start_env_state = env.reset(subkey)
 
         # Get first actions
         initial_outputs = jax.vmap(initial_model)(start_state)
@@ -178,6 +179,7 @@ def make_run(args):
         )
 
         # Get the distribution of states and actions if we just had a num_bins by num_bins grid
+        ### TODO: Remove obs counts
         observation_counts = ObservationCounts.create(
             num_bins=initial_model.num_bins,
             low=env.observation_space(env_params).low,
@@ -220,9 +222,9 @@ def make_run(args):
 
                 # Step Environment
                 key, subkey = jax.random.split(key, 2)
-                next_state, step_env_state, reward, done, info = vmap_step(
-                    args.num_environments
-                )(subkey, step_env_state, action)
+                next_state, step_env_state, reward, done, info = env.step(
+                    subkey, step_env_state, action
+                )
                 # Get next actions
                 model_outs = jax.vmap(model)(next_state)
                 next_q_values = model_outs[0]

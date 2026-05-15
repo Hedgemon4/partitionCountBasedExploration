@@ -10,6 +10,7 @@ from configs.networks import (
     QNetworkCartpole as QNetworkCartpoleConfig,
     QNetworkCounts as QNetworkCountsConfig,
     QNetworkCountsWithNextStatePrediction as QNetworkCountsWithNextStatePredictionConfig,
+    QNetworkCNNCountsConfig,
 )
 
 
@@ -357,34 +358,42 @@ class QNetworkCNNCounts(QNetworkCounts):
     def __init__(self, input_size, num_actions, key, network_config):
         # Need to change input size
         keys = jax.random.split(key, 5)
-        super().__init__(512, num_actions, keys[0], network_config)
+        if network_config.padding == "VALID":
+            network_input = 3136
+        elif network_config.padding == "SAME":
+            network_input = 7744
+        else:
+            raise ValueError("Unknown padding type")
+
+        super().__init__(network_input, num_actions, keys[0], network_config)
         self.next_state_coef = network_config.next_state_coef
+        print(f"Input size: {input_size}")
 
         self.cnn = [
             eqx.nn.Conv2d(
                 in_channels=input_size,
                 out_channels=32,
-                kernel_size=8,
-                stride=4,
-                padding="SAME",
+                kernel_size=(8, 8),
+                stride=(4, 4),
+                padding=network_config.padding,
                 key=keys[1],
             ),
             eqx.nn.Lambda(jax.nn.relu),
             eqx.nn.Conv2d(
                 in_channels=32,
                 out_channels=64,
-                kernel_size=4,
-                stride=2,
-                padding="SAME",
+                kernel_size=(4, 4),
+                stride=(2, 2),
+                padding=network_config.padding,
                 key=keys[2],
             ),
             eqx.nn.Lambda(jax.nn.relu),
             eqx.nn.Conv2d(
                 in_channels=64,
                 out_channels=64,
-                kernel_size=3,
-                stride=1,
-                padding="SAME",
+                kernel_size=(3, 3),
+                stride=(1, 1),
+                padding=network_config.padding,
                 key=keys[3],
             ),
             eqx.nn.Lambda(jax.nn.relu),
@@ -408,7 +417,7 @@ class QNetworkCNNCounts(QNetworkCounts):
         # Explicitly indicate counts are not trainable
         jax.lax.stop_gradient(self.counts)
         # Change from (batch, channels, height, width) to (batch, height, width, channels) for eqx.nn.Conv2d
-        x = jnp.transpose(x, (0, 2, 3, 1))
+        x = x / 255.0
 
         for layer in self.cnn:
             x = layer(x)
@@ -434,7 +443,7 @@ class QNetworkCNNCounts(QNetworkCounts):
         return x, discrete_representation, predicted_next_state
 
     def get_discrete_representation(self, states):
-        x = jnp.transpose(states, (0, 2, 3, 1))
+        x = states / 255.0
         for layer in self.cnn:
             x = layer(x)
 
@@ -499,7 +508,7 @@ def make_network(input_size, num_actions, key, network_config):
             key=key,
             network_config=network_config,
         )
-    elif isinstance(network_config, QNetworkCNNCounts):
+    elif isinstance(network_config, QNetworkCNNCountsConfig):
         return QNetworkCNNCounts(
             input_size=input_size,
             num_actions=num_actions,
