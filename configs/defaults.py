@@ -290,7 +290,12 @@ class MountainCarWithIntrinsicRewardsAndStatePredictionConfig(BaseConfig):
 
 
 @chex.dataclass(frozen=True)
-class AtariConfig(BaseConfig):
+class AtariConfig:
+    # Experiment Configs
+    seed: int = 0
+    num_seeds: int = 1
+    num_episodes_for_average: int = 30
+
     # Experiment Configs
     output_folder_name: str = "atari_testing"
 

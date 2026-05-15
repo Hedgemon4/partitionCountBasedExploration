@@ -407,7 +407,7 @@ class QNetworkCNNCounts(QNetworkCounts):
         self.next_state_head = [
             eqx.nn.Linear(
                 in_features=blocks[-1].hidden_size,
-                out_features=input_size,
+                out_features=blocks[self.count_layer - 1].hidden_size,
                 key=keys[4],
             ),
             activation,

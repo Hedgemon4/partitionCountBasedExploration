@@ -276,7 +276,7 @@ class ALEGymnaxWrapperStandard:
 
         # Use pure_callback to call non-JAX ale_py from inside JIT
         obs, reward, term, trunc = self._step_callback(action)
-        rew = jnp.atleast_1d(jnp.asarray(reward, dtype=jnp.float32))
+        reward = jnp.atleast_1d(jnp.asarray(reward, dtype=jnp.float32))
         term = jnp.atleast_1d(jnp.asarray(term, dtype=jnp.float32))
         trunc = jnp.atleast_1d(jnp.asarray(trunc, dtype=jnp.float32))
         done = jnp.logical_or(term, trunc)
@@ -321,8 +321,8 @@ class ALEGymnaxWrapperStandard:
             (
                 jax.ShapeDtypeStruct(obs_shape, dtype=np.uint8),
                 jax.ShapeDtypeStruct((self.num_envs,), dtype=np.float32),
-                jax.ShapeDtypeStruct((self.num_envs,), dtype=np.float32),
-                jax.ShapeDtypeStruct((self.num_envs,), dtype=np.float32),
+                jax.ShapeDtypeStruct((self.num_envs,), dtype=np.bool_),
+                jax.ShapeDtypeStruct((self.num_envs,), dtype=np.bool_),
             ),
             action,
         )
