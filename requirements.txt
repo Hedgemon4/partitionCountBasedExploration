@@ -1,5 +1,4 @@
-absl-py==2.4.0
-ale-py==0.11.2
+absl_py==2.4.0
 chex==0.1.91
 equinox==0.13.0
 gymnax==0.0.9
