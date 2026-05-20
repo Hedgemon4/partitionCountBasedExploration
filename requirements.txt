@@ -2,7 +2,7 @@ absl_py==2.4.0
 chex==0.1.91
 equinox==0.13.0
 gymnax==0.0.9
-jax==0.9.1
+jax[cuda12]==0.9.1
 jaxlib==0.9.1
 jaxtyping==0.3.9
 ml_dtypes==0.5.4
