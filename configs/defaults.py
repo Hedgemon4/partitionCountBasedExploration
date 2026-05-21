@@ -317,7 +317,7 @@ class AtariConfig:
     num_steps: int = 32
     total_time_steps: float = 5e7
     framestack: int = 4
-    force_xla: bool = False
+    force_xla: bool = True
 
     # Exploration Configs
     beta: float = 0.5
