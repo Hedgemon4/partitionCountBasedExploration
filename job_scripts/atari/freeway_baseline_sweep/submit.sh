@@ -19,10 +19,10 @@ python -m pip install -U -r requirements.txt --no-index -f wheels/
 
 python -m pip install ale/ --no-index
 
-cp /home/slakins/links/scratch/projects/partitionCountBasedExploration/roms/*.bin $SLURM_TMPDIR/env/lib/python3.12/site-packages/ale_py/roms/
+cp /home/slakins/scratch/projects/partitionCountBasedExploration/roms/*.bin $SLURM_TMPDIR/env/lib/python3.12/site-packages/ale_py/roms/
 
 PARAMS=$(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" "$CONFIG_PATH")
 
 echo "Starting Run"
-python pqn_atari_with_counts.py $PARAMS
+python pqn_atari.py $PARAMS
 echo "Finished Run"
