@@ -3,21 +3,22 @@ import time
 from pathlib import Path
 from typing import Union, Annotated
 
+import chex
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
 import tyro
-import gymnax
-import chex
 import yaml
+from ale_py import AtariVectorEnv
+from gymnasium.vector import AutoresetMode
 
 import configs.defaults as configs
 from exploration import epsilon_greedy
 from helper_functions import update_ema
-from netwoks import QNetwork
-from wrappers import FlattenObservationWrapper, LogWrapper
+from netwoks import QNetworkCNN
+from wrappers import ALEGymnaxWrapperXLA, ALEGymnaxWrapperStandard
 
 """
 PQN implementation based on https://github.com/mttga/purejaxql/blob/main/purejaxql/pqn_gymnax.py
@@ -80,12 +81,12 @@ def make_env(args):
     )
     return env, env_params
 
+
 def make_run(args):
     num_updates = int(args.total_time_steps // args.num_environments // args.num_steps)
 
     # Environment Setup
-    episode_length = getattr(args, "episode_length", None)
-    env, vmap_reset, vmap_step, env_params = make_env(args.environment, episode_length)
+    env, env_params = make_env(args)
 
     input_size = int(env.observation_space(env_params).shape[0])
     num_actions = int(env.action_space(env_params).n)
@@ -93,7 +94,7 @@ def make_run(args):
     def run(key):
         # Network Setup
         key, subkey = jax.random.split(key, 2)
-        initial_model = QNetwork(
+        initial_model = QNetworkCNN(
             input_size=input_size,
             num_actions=num_actions,
             key=subkey,
@@ -126,7 +127,7 @@ def make_run(args):
 
         # Reset Environment
         key, subkey = jax.random.split(key, 2)
-        start_state, start_env_state = vmap_reset(args.num_environments)(subkey)
+        start_state, start_env_state = env.reset(subkey)
 
         # Get first actions
         initial_q_values = jax.vmap(initial_model)(start_state)
@@ -177,9 +178,9 @@ def make_run(args):
 
                 # Step Environment
                 key, subkey = jax.random.split(key, 2)
-                next_state, step_env_state, reward, done, info = vmap_step(
-                    args.num_environments
-                )(subkey, step_env_state, action)
+                next_state, step_env_state, reward, done, info = env.step(
+                    subkey, step_env_state, action
+                )
                 # Get next actions
                 next_q_values = jax.vmap(model)(next_state)
                 key, subkey = jax.random.split(key, 2)
@@ -299,7 +300,7 @@ def make_run(args):
                         )
                     )
                     updates, optimizer_state = optim.update(
-                        grads, optimizer_state, eqx.filter(model, eqx.is_array)
+                        grads, optimizer_state, model_params
                     )
                     model = eqx.apply_updates(model, updates)
                     params, _ = eqx.partition(model, eqx.is_array)
@@ -397,20 +398,16 @@ def make_run(args):
 
 ConfigOptions = Union[
     Annotated[
-        configs.PQNCartpoleConfig,
-        tyro.conf.subcommand(name="cartpole"),
-    ],
-    Annotated[
-        configs.PQNMountainCarConfig,
-        tyro.conf.subcommand(name="mountaincar"),
-    ],
+        configs.AtariCountsConfig,
+        tyro.conf.subcommand(name="pong"),
+    ]
 ]
 
 
 if __name__ == "__main__":
     args = tyro.cli(
         ConfigOptions,
-        default=configs.PQNCartpoleConfig(),
+        default=configs.AtariCountsConfig(),
         config=(tyro.conf.CascadeSubcommandArgs,),
     )
 
@@ -426,9 +423,10 @@ if __name__ == "__main__":
     rng = jax.random.PRNGKey(args.seed)
 
     t0 = time.time()
-    rngs = jax.random.split(rng, args.num_seeds)
-    compiled_run = jax.jit(jax.vmap(make_run(args)))
-    metrics = jax.block_until_ready(compiled_run(rngs))
+    if args.num_seeds > 1:
+        raise NotImplementedError("Multiple seeds are not currently supported")
+    compiled_run = jax.jit(make_run(args))
+    metrics = jax.block_until_ready(compiled_run(rng))
     print(f"Total time: {time.time() - t0}")
 
     metrics_path = save_path / "metrics.npz"

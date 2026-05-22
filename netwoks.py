@@ -15,11 +15,13 @@ from configs.networks import (
 
 
 class QNetwork(eqx.Module):
-    layers: list
-    num_bins: int = 10
+    blocks: list
+    value_head: list
+    num_bins: int
 
     def __init__(self, input_size, num_actions, key, network_config):
-        self.layers = []
+        self.blocks = []
+        self.num_bins = 10
         blocks = network_config.blocks
         keys = jax.random.split(key, len(blocks) + 1)
 
@@ -31,15 +33,15 @@ class QNetwork(eqx.Module):
 
             # We need to flatten the output of the activation if there were multiple bins in the previous layer, since each bin will be treated as a separate feature for the next layer
             if previous_bins > 1:
-                self.layers.append(eqx.nn.Lambda(jnp.ravel))
+                self.blocks.append(eqx.nn.Lambda(jnp.ravel))
 
-            self.layers.append(
+            self.blocks.append(
                 eqx.nn.Linear(
                     in_features=input_features, out_features=hidden_size, key=keys[i]
                 )
             )
 
-            self.layers.append(
+            self.blocks.append(
                 eqx.nn.LayerNorm(
                     hidden_size,
                     use_weight=learnable_norm_params,
@@ -49,22 +51,24 @@ class QNetwork(eqx.Module):
             activation = make_activation(block.activation)
             num_bins = getattr(activation, "num_bins", 1)
 
-            self.layers.append(activation)
+            self.blocks.append(activation)
 
             # Compute the number of input features for the next layer, which will be the hidden size times the number of bins for the current activation
             input_features = hidden_size * num_bins
             previous_bins = num_bins
 
-        self.layers.append(
+        self.value_head = [
             eqx.nn.Linear(
                 in_features=blocks[-1].hidden_size,
                 out_features=num_actions,
                 key=keys[-1],
             )
-        )
+        ]
 
     def __call__(self, x):
-        for layer in self.layers:
+        for layer in self.blocks:
+            x = layer(x)
+        for layer in self.value_head:
             x = layer(x)
         return x
 
@@ -477,6 +481,83 @@ class QNetworkCNNCounts(QNetworkCounts):
             "total": total_loss,
             "q": q_loss,
             "next_state": next_state_loss,
+        }
+        return total_loss, (selected_q_values, losses)
+
+
+class QNetworkCNN(QNetwork):
+    cnn: list
+
+    def __init__(self, input_size, num_actions, key, network_config):
+        # Need to change input size
+        keys = jax.random.split(key, 4)
+        if network_config.padding == "VALID":
+            network_input = 3136
+        elif network_config.padding == "SAME":
+            network_input = 7744
+        else:
+            raise ValueError("Unknown padding type")
+
+        super().__init__(network_input, num_actions, keys[0], network_config)
+        print(f"Input size: {input_size}")
+
+        self.cnn = [
+            eqx.nn.Conv2d(
+                in_channels=input_size,
+                out_channels=32,
+                kernel_size=(8, 8),
+                stride=(4, 4),
+                padding=network_config.padding,
+                key=keys[1],
+            ),
+            eqx.nn.Lambda(jax.nn.relu),
+            eqx.nn.Conv2d(
+                in_channels=32,
+                out_channels=64,
+                kernel_size=(4, 4),
+                stride=(2, 2),
+                padding=network_config.padding,
+                key=keys[2],
+            ),
+            eqx.nn.Lambda(jax.nn.relu),
+            eqx.nn.Conv2d(
+                in_channels=64,
+                out_channels=64,
+                kernel_size=(3, 3),
+                stride=(1, 1),
+                padding=network_config.padding,
+                key=keys[3],
+            ),
+            eqx.nn.Lambda(jax.nn.relu),
+            eqx.nn.Lambda(jnp.ravel),
+        ]
+
+    def __call__(self, x):
+        x = x / 255.0
+
+        for layer in self.cnn:
+            x = layer(x)
+
+        for layer in self.blocks:
+            x = layer(x)
+
+        for layer in self.value_head:
+            x = layer(x)
+
+        return x
+
+    def loss(self, mini_batch, targets):
+        q_values = jax.vmap(self)(mini_batch.state)
+        index = jnp.arange(q_values.shape[0])
+        selected_q_values = q_values[index, mini_batch.action]
+
+        q_loss = 0.5 * jnp.mean((selected_q_values - targets) ** 2)
+
+        total_loss = q_loss
+
+        losses = {
+            "total": total_loss,
+            "q": q_loss,
         }
         return total_loss, (selected_q_values, losses)
 

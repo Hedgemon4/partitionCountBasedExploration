@@ -71,12 +71,14 @@ class QNetworkCNNCountsConfig(CNNNetworkConfig):
         default_factory=lambda: [FTABlock(hidden_size=512), Block(hidden_size=512)]
     )
 
+
 @dataclasses.dataclass(frozen=True)
 class QNetworkCNNConfig(CNNNetworkConfig):
     type: Literal["q_network_cnn"] = "q_network_cnn"
     blocks: list[Block] = dataclasses.field(
         default_factory=lambda: [Block(hidden_size=512)]
     )
+
 
 NetworkConfig = Union[
     QNetwork,

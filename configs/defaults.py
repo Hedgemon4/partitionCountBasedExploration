@@ -10,6 +10,7 @@ from configs.networks import (
     QNetworkCartpole,
     QNetworkCountsWithNextStatePrediction,
     QNetworkCNNCountsConfig,
+    QNetworkCNNConfig,
 )
 
 
@@ -298,6 +299,45 @@ class AtariConfig:
 
     # Experiment Configs
     output_folder_name: str = "atari_testing"
+
+    # Algorithm Configs
+    initial_learning_rate: float = 0.00025
+    final_learning_rate: float = 0.00025
+    num_epochs: int = 2
+    num_minibatches: int = 32
+    gamma: float = 0.99
+    lambda_returns: bool = True
+    lam: float = 0.65
+    max_grad_norm: float = 10.0
+    reward_scale: float = 1.0
+    sarsa_returns: bool = True
+
+    # Env Configs
+    environment: str = "pong"
+    num_environments: int = 128
+    num_steps: int = 32
+    total_time_steps: float = 5e7
+    framestack: int = 4
+    force_xla: bool = False
+
+    # Exploration Configs
+    epsilon_start: float = 1.0
+    epsilon_end: float = 0.001
+    epsilon_decay: float = 0.1
+
+    # Network Activation Configs
+    network: NetworkConfig = QNetworkCNNConfig()
+
+
+@chex.dataclass(frozen=True)
+class AtariCountsConfig:
+    # Experiment Configs
+    seed: int = 0
+    num_seeds: int = 1
+    num_episodes_for_average: int = 30
+
+    # Experiment Configs
+    output_folder_name: str = "atari_counts_testing"
 
     # Algorithm Configs
     initial_learning_rate: float = 0.00025
