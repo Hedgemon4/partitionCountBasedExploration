@@ -1,9 +1,9 @@
 #!/bin/bash
-#SBATCH --account=rrg-mbowling-ad
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=32000M
-#SBATCH --time=2:59:00
-#SBATCH --gpus=h100_2g.20gb:1
+#SBATCH --account=aip-mbowling
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=32GB
+#SBATCH --time=02:59:00
+#SBATCH --gpus=1
 
 module load python/3.12.4
 module load gcc/12.3
@@ -21,4 +21,8 @@ python -m pip install ale/ --no-index
 
 cp /home/slakins/links/scratch/projects/partitionCountBasedExploration/roms/*.bin $SLURM_TMPDIR/env/lib/python3.12/site-packages/ale_py/roms/
 
-python pqn_atari_with_counts.py --output-folder-name atari/freeway_testing/ --environment freeway
+PARAMS=$(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" "$CONFIG_PATH")
+
+echo "Starting Run"
+python pqn_atari_with_counts.py $PARAMS
+echo "Finished Run"

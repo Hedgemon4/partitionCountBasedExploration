@@ -1,0 +1,10 @@
+--environment freeway --force-xla --seed 0 --output-folder-name freeway_baseline_sweep/run_0
+--environment freeway --force-xla --seed 1 --output-folder-name freeway_baseline_sweep/run_1
+--environment freeway --force-xla --seed 2 --output-folder-name freeway_baseline_sweep/run_2
+--environment freeway --force-xla --seed 3 --output-folder-name freeway_baseline_sweep/run_3
+--environment freeway --force-xla --seed 4 --output-folder-name freeway_baseline_sweep/run_4
+--environment freeway --force-xla --seed 5 --output-folder-name freeway_baseline_sweep/run_5
+--environment freeway --force-xla --seed 6 --output-folder-name freeway_baseline_sweep/run_6
+--environment freeway --force-xla --seed 7 --output-folder-name freeway_baseline_sweep/run_7
+--environment freeway --force-xla --seed 8 --output-folder-name freeway_baseline_sweep/run_8
+--environment freeway --force-xla --seed 9 --output-folder-name freeway_baseline_sweep/run_9

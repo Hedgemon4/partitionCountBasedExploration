@@ -19,6 +19,6 @@ python -m pip install -U -r requirements.txt --no-index -f wheels/
 
 python -m pip install ale/ --no-index
 
-cp /home/slakins/links/scratch/projects/partitionCountBasedExploration/roms/*.bin    $SLURM_TMPDIR/env/lib/python3.12/site-packages/ale_py/roms/
+cp /home/slakins/links/scratch/projects/partitionCountBasedExploration/roms/*.bin $SLURM_TMPDIR/env/lib/python3.12/site-packages/ale_py/roms/
 
 python pqn_atari_with_counts.py --output-folder-name atari/pong_testing/
