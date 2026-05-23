@@ -10,15 +10,34 @@ import re
 import warnings
 import scipy.stats as stats
 
-# Import shared histogram helpers so every bin-usage plot across the project
-# uses the exact same format (stacked by action, seed std error bars, per-seed
-# dots, percentage labels, outlier annotation).
-from count_histogram import (
-    plot_histogram_with_actions,
-    plot_neuron_summary,
-    find_outlier_seeds,
-    aggregate_counts,
-)
+# The shared histogram helpers (count_histogram.py) are imported lazily — see
+# _count_histogram_helpers() below. Keeping the import lazy means the reward
+# curve plots, and in particular --group-seeds mode, still run on checkouts
+# where count_histogram.py is not present.
+
+
+def _count_histogram_helpers():
+    """Lazily import the shared bin-usage histogram helpers.
+
+    These keep every bin-usage plot across the project in the exact same
+    format (stacked by action, seed std error bars, per-seed dots, percentage
+    labels, outlier annotation). They are only needed by the optional count /
+    evolution plots, so importing them lazily lets the reward-curve plots run
+    without count_histogram.py on the path.
+    """
+    from count_histogram import (
+        plot_histogram_with_actions,
+        plot_neuron_summary,
+        find_outlier_seeds,
+        aggregate_counts,
+    )
+
+    return (
+        plot_histogram_with_actions,
+        plot_neuron_summary,
+        find_outlier_seeds,
+        aggregate_counts,
+    )
 
 # Snapshot subdirectories written by pqn_with_counts.py when
 # count_save_timestep_interval > 0. Each directory contains one .npy file
@@ -54,6 +73,23 @@ class Args:
     # If you want to look at shorter episode length you need to have the data from largest to smallest value
     reverse: bool = False
     plot_extra: bool = False
+
+    group_seeds: bool = False
+    """Seed-grouping mode for sweeps that write ONE folder per
+    (hyperparameter, seed) combination — e.g. data/freeway_sweep, where each
+    metrics.npz holds 1-D arrays for a single seed.
+
+    When set, run folders that share the same `beta` and
+    `network.next_state_coef` are merged into a single multi-seed run (one row
+    per seed), the merged runs are ranked by `score_metric`, and ONLY the
+    extrinsic and intrinsic reward curves are produced (each with its own
+    legend). The per-folder multi-seed behaviour is used when this is off."""
+
+    next_state_coefs: Optional[Tuple[float, ...]] = None
+    """--group-seeds only: restrict plotting to these `network.next_state_coef`
+    values. None = all of them. Pass e.g. `--next-state-coefs 0.25 0.5 1.0` to
+    drop the 0.0 (no next-state-prediction) baseline and compare only the runs
+    that actually use the next-state-prediction loss."""
 
     # --- LEGEND PARAMETERS ---
     legend_vars: Optional[List[str]] = field(
@@ -243,16 +279,42 @@ def plot_curves(
     title,
     smooth_win,
     y_lim: Optional[Tuple[float, float]] = None,
+    show_legend: bool = False,
+    nan_aware: bool = False,
 ):
+    """Plot one mean +/- 95% CI curve per result.
+
+    Parameters
+    ----------
+    show_legend
+        Draw the legend directly on the axes. Used by --group-seeds mode so
+        each reward plot is self-contained (the per-folder path instead saves
+        a separate legend image).
+    nan_aware
+        Aggregate across seeds with NaN-aware reductions. The freeway reward
+        metrics are NaN until each seed finishes its first episode, so the
+        leading timesteps must be skipped per-seed rather than poisoning the
+        whole column.
+    """
     fig, ax = plt.subplots(figsize=(10, 6))
-    colors = plt.cm.get_cmap("tab20", len(results))
+    colors = plt.cm.get_cmap("tab20", max(len(results), 1))
     for i, res in enumerate(results):
         if res["values"] is None:
             continue
         smoothed = moving_average(res["values"], smooth_win)
         steps = res["steps"][: smoothed.shape[1]]
-        mean, std_err = np.mean(smoothed, axis=0), stats.sem(smoothed, axis=0)
-        ci = std_err * stats.t.ppf((1 + 0.95) / 2.0, len(res["values"]) - 1)
+        n_seeds = len(res["values"])
+        if nan_aware:
+            with warnings.catch_warnings():
+                # All-NaN leading columns are expected (pre-first-episode).
+                warnings.simplefilter("ignore", RuntimeWarning)
+                mean = np.nanmean(smoothed, axis=0)
+                std = np.nanstd(smoothed, axis=0, ddof=1)
+            n_valid = np.sum(~np.isnan(smoothed), axis=0)
+            std_err = std / np.sqrt(np.maximum(n_valid, 1))
+        else:
+            mean, std_err = np.mean(smoothed, axis=0), stats.sem(smoothed, axis=0)
+        ci = std_err * stats.t.ppf((1 + 0.95) / 2.0, max(n_seeds - 1, 1))
         label = f"Rank {i + 1} | {res['name']}"
         ax.plot(steps, mean, label=label, color=colors(i), linewidth=2)
         ax.fill_between(steps, mean - ci, mean + ci, color=colors(i), alpha=0.15)
@@ -262,12 +324,129 @@ def plot_curves(
     ax.grid(True, linestyle="--", alpha=0.7)
     if y_lim is not None:
         ax.set_ylim(y_lim)
+    if show_legend:
+        ax.legend(fontsize=8, loc="best")
     fig.savefig(output_path, dpi=300, bbox_inches="tight")
     return ax.get_legend_handles_labels()
 
 
+def _resolve_reward_metrics(args: Args) -> Tuple[str, Optional[str]]:
+    """Pick the extrinsic / intrinsic metric names for --group-seeds mode.
+
+    `metric` defaults to "length_ema" (a MountainCar metric). For a reward
+    sweep like freeway that default is meaningless, so fall back to
+    "extrinsic_return_ema" unless the user passed something explicit.
+    """
+    ext_metric = args.metric
+    if ext_metric in (None, "length_ema"):
+        ext_metric = "extrinsic_return_ema"
+    return ext_metric, args.intrinsic_metric
+
+
+def _main_grouped(args: Args):
+    """--group-seeds mode.
+
+    Merges single-seed run folders by (beta, network.next_state_coef), ranks
+    the merged multi-seed runs by `score_metric` (best reward first), and emits
+    ONLY the extrinsic and intrinsic reward curves, each with its own legend.
+    """
+    from sweep_grouping import build_grouped_runs, filter_by_config, format_group_label
+
+    ext_metric, int_metric = _resolve_reward_metrics(args)
+    metric_names = [ext_metric] + ([int_metric] if int_metric else [])
+
+    groups = build_grouped_runs(
+        args.root_dir,
+        group_keys=("beta", "network.next_state_coef"),
+        metric_names=tuple(metric_names),
+    )
+    if not groups:
+        print("No grouped runs found — check --root-dir.")
+        return
+
+    groups = filter_by_config(groups, "network.next_state_coef", args.next_state_coefs)
+    if not groups:
+        print(f"No groups left after --next-state-coefs {args.next_state_coefs}.")
+        return
+
+    results = []
+    for g in groups:
+        ext = g.metrics.get(ext_metric)
+        if ext is None:
+            continue
+        score, final_vals = compute_score(ext, g.steps, args.score_metric)
+        results.append(
+            {
+                "name": format_group_label(g),
+                "steps": g.steps,
+                "values": ext,
+                "int_values": g.metrics.get(int_metric) if int_metric else None,
+                "score": score,
+                "final_seed_vals": final_vals,
+            }
+        )
+
+    # Reward metrics: higher is better, so rank descending (best first).
+    results.sort(key=lambda x: x["score"], reverse=True)
+    top_results = results[: args.top_k]
+    if not top_results:
+        print("No matching groups.")
+        return
+
+    print(
+        f"\n--- Top {len(top_results)} groups by {args.score_metric} "
+        f"on {ext_metric} ---"
+    )
+    for i, res in enumerate(top_results, start=1):
+        print(f"  Rank {i}: score={res['score']:.3f} | {res['name']}")
+
+    # The dataclass y-limit defaults (100, 200)/(0, 80) are MountainCar
+    # length-scale ranges; for a reward sweep let matplotlib autoscale unless
+    # the user passed explicit limits.
+    ext_ylim = None if args.y_lim == (100, 200) else args.y_lim
+    int_ylim = None if args.intrinsic_y_lim == (0, 80) else args.intrinsic_y_lim
+
+    # 1. Extrinsic reward curves
+    plot_curves(
+        top_results,
+        ext_metric,
+        args.output_dir / "filtered_learning_curves.png",
+        f"Extrinsic Reward — Top {len(top_results)} groups by {args.score_metric}",
+        args.smooth,
+        y_lim=ext_ylim,
+        show_legend=True,
+        nan_aware=True,
+    )
+    print(f"  saved {args.output_dir / 'filtered_learning_curves.png'}")
+
+    # 2. Intrinsic reward curves
+    if int_metric:
+        intrinsic_res = [
+            {"name": r["name"], "steps": r["steps"], "values": r["int_values"]}
+            for r in top_results
+        ]
+        plot_curves(
+            intrinsic_res,
+            int_metric,
+            args.output_dir / "intrinsic_reward_curves.png",
+            f"Intrinsic Reward — Top {len(top_results)} groups",
+            args.smooth,
+            y_lim=int_ylim,
+            show_legend=True,
+            nan_aware=True,
+        )
+        print(f"  saved {args.output_dir / 'intrinsic_reward_curves.png'}")
+
+
 def main(args: Args):
     args.output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Seed-grouping mode (one folder per (hyperparam, seed)) takes its own path
+    # and only produces the extrinsic + intrinsic reward curves.
+    if args.group_seeds:
+        _main_grouped(args)
+        return
+
     run_folders = [d for d in args.root_dir.iterdir() if d.is_dir()]
 
     all_filtered = []
@@ -378,6 +557,10 @@ def _plot_count_histograms(top_results, args: Args):
     A combined side-by-side plot with a shared y-axis is also produced so
     runs can be compared directly.
     """
+    plot_histogram_with_actions, plot_neuron_summary, _, _ = (
+        _count_histogram_helpers()
+    )
+
     hist_dir = args.output_dir / "count_histograms"
     hist_dir.mkdir(parents=True, exist_ok=True)
 
@@ -607,6 +790,8 @@ def _plot_fta_evolution(
       * bin_heatmap   : a timestep x bin heatmap of the mean (across seeds)
                         per-seed bin total, summed over neurons and actions.
     """
+    plot_histogram_with_actions, *_ = _count_histogram_helpers()
+
     T = counts_hist.shape[0]
     # --- (a) Grid of per-timestep histograms -----------------------------
     # Wrap the timesteps into a roughly-square 2D grid so each subplot is

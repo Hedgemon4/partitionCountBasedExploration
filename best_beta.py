@@ -51,6 +51,25 @@ class Args:
                          higher return is better)  [default]
     """
 
+    group_seeds: bool = False
+    """Seed-grouping mode for sweeps that write ONE folder per
+    (hyperparameter, seed) combination — e.g. data/freeway_sweep, where each
+    metrics.npz holds 1-D arrays for a single seed.
+
+    When set, run folders that share the same `beta` and
+    `network.next_state_coef` are merged into a single multi-seed run (one row
+    per seed). For each beta the best `next_state_coef` group (highest reward)
+    is selected, and ONLY the extrinsic and intrinsic reward curves are
+    produced (each with its own legend). The per-folder multi-seed behaviour is
+    used when this is off."""
+
+    next_state_coefs: Optional[Tuple[float, ...]] = None
+    """--group-seeds only: restrict the per-beta search to these
+    `network.next_state_coef` values. None = all of them. Pass e.g.
+    `--next-state-coefs 0.25 0.5 1.0` to drop the 0.0 (no next-state-prediction)
+    baseline so each beta's champion is the best run that actually uses the
+    next-state-prediction loss."""
+
     # --- FILTER PARAMETERS ---
     beta_filter: Optional[float] = None  # Used if you only want to plot specific betas
     activation: Optional[str] = None
@@ -253,10 +272,25 @@ def plot_beta_curves(
     output_path: Path,
     smooth: int,
     y_lim: Optional[Tuple[float, float]] = None,
+    show_legend: bool = False,
+    nan_aware: bool = False,
 ):
-    """Helper function to plot learning curves for a specific metric."""
+    """Helper function to plot learning curves for a specific metric.
+
+    Parameters
+    ----------
+    show_legend
+        Draw the legend directly on the axes. Used by --group-seeds mode so
+        each reward plot is self-contained (the per-folder path instead saves
+        a separate legend image).
+    nan_aware
+        Aggregate across seeds with NaN-aware reductions. The freeway reward
+        metrics are NaN until each seed finishes its first episode, so the
+        leading timesteps must be skipped per-seed rather than poisoning the
+        whole column.
+    """
     fig, ax = plt.subplots(figsize=(10, 6))
-    colors = plt.cm.get_cmap("tab10", len(sorted_betas))
+    colors = plt.cm.get_cmap("tab10", max(len(sorted_betas), 1))
 
     for i, b in enumerate(sorted_betas):
         res = best_runs[b]
@@ -268,9 +302,19 @@ def plot_beta_curves(
         smoothed_vals = moving_average(res[metric_key], smooth)
         plot_steps = res["steps"][: smoothed_vals.shape[1]]
 
-        mean = np.mean(smoothed_vals, axis=0)
-        std_err = stats.sem(smoothed_vals, axis=0)
-        ci = std_err * stats.t.ppf((1 + 0.95) / 2.0, len(res[metric_key]) - 1)
+        n_seeds = len(res[metric_key])
+        if nan_aware:
+            with warnings.catch_warnings():
+                # All-NaN leading columns are expected (pre-first-episode).
+                warnings.simplefilter("ignore", RuntimeWarning)
+                mean = np.nanmean(smoothed_vals, axis=0)
+                std = np.nanstd(smoothed_vals, axis=0, ddof=1)
+            n_valid = np.sum(~np.isnan(smoothed_vals), axis=0)
+            std_err = std / np.sqrt(np.maximum(n_valid, 1))
+        else:
+            mean = np.mean(smoothed_vals, axis=0)
+            std_err = stats.sem(smoothed_vals, axis=0)
+        ci = std_err * stats.t.ppf((1 + 0.95) / 2.0, max(n_seeds - 1, 1))
 
         label = f"Beta {b} | {res['legend_name']}"
 
@@ -285,6 +329,8 @@ def plot_beta_curves(
     ax.grid(True, linestyle="--", alpha=0.7)
     if y_lim is not None:
         ax.set_ylim(y_lim)
+    if show_legend:
+        ax.legend(fontsize=8, loc="best")
 
     fig.savefig(output_path, dpi=300, bbox_inches="tight")
     print(f"Saved {metric_title} curves to {output_path}")
@@ -292,8 +338,127 @@ def plot_beta_curves(
     return ax.get_legend_handles_labels()
 
 
+def _resolve_reward_metrics(args: Args) -> Tuple[str, Optional[str]]:
+    """Pick the extrinsic / intrinsic metric names for --group-seeds mode.
+
+    `metric` defaults to "length_ema" (a MountainCar metric). For a reward
+    sweep like freeway that default is meaningless, so fall back to
+    "extrinsic_return_ema" unless the user passed something explicit.
+    """
+    ext_metric = args.metric
+    if ext_metric in (None, "length_ema"):
+        ext_metric = "extrinsic_return_ema"
+    return ext_metric, args.intrinsic_metric
+
+
+def _main_grouped(args: Args):
+    """--group-seeds mode.
+
+    Merges single-seed run folders by (beta, network.next_state_coef). For
+    each beta the best-scoring next_state_coef group is selected (highest
+    reward), and ONLY the extrinsic and intrinsic reward curves are produced,
+    each with its own legend.
+    """
+    from sweep_grouping import build_grouped_runs, filter_by_config
+
+    ext_metric, int_metric = _resolve_reward_metrics(args)
+    metric_names = [ext_metric] + ([int_metric] if int_metric else [])
+
+    groups = build_grouped_runs(
+        args.root_dir,
+        group_keys=("beta", "network.next_state_coef"),
+        metric_names=tuple(metric_names),
+    )
+    if not groups:
+        print("No grouped runs found — check --root-dir.")
+        return
+
+    groups = filter_by_config(groups, "network.next_state_coef", args.next_state_coefs)
+    if not groups:
+        print(f"No groups left after --next-state-coefs {args.next_state_coefs}.")
+        return
+
+    # For each beta, keep the next_state_coef group with the best (highest)
+    # reward score.
+    best_runs_by_beta: Dict[float, Dict[str, Any]] = {}
+    for g in groups:
+        beta = g.config.get("beta")
+        coef = g.config.get("network.next_state_coef")
+        ext = g.metrics.get(ext_metric)
+        if beta is None or ext is None:
+            continue
+
+        score, final_seed_vals = compute_score(ext, g.steps, args.score_metric)
+
+        # Reward: higher is better.
+        if beta not in best_runs_by_beta or score > best_runs_by_beta[beta]["score"]:
+            best_runs_by_beta[beta] = {
+                "legend_name": f"next_state_coef={coef} | n={g.n_seeds} seeds",
+                "steps": g.steps,
+                "ext_values": ext,
+                "int_values": g.metrics.get(int_metric) if int_metric else None,
+                "score": score,
+                "final_seed_vals": final_seed_vals,
+                "beta": beta,
+                "next_state_coef": coef,
+            }
+
+    if not best_runs_by_beta:
+        print("No valid grouped runs found. Exiting.")
+        return
+
+    sorted_betas = sorted(best_runs_by_beta.keys())
+
+    print("\n--- Champions per Beta (best next_state_coef) ---")
+    for b in sorted_betas:
+        res = best_runs_by_beta[b]
+        print(
+            f"Beta {b}: score {res['score']:.3f} | "
+            f"next_state_coef={res['next_state_coef']}"
+        )
+
+    # The dataclass y-limit defaults (100, 200)/(0, 80) are MountainCar
+    # length-scale ranges; for a reward sweep let matplotlib autoscale unless
+    # the user passed explicit limits.
+    ext_ylim = None if args.y_lim == (100, 200) else args.y_lim
+    int_ylim = None if args.intrinsic_y_lim == (0, 80) else args.intrinsic_y_lim
+
+    # 1. Extrinsic reward curves
+    plot_beta_curves(
+        best_runs_by_beta,
+        sorted_betas,
+        "ext_values",
+        ext_metric,
+        args.output_dir / "best_by_beta_extrinsic_curves.png",
+        args.smooth,
+        y_lim=ext_ylim,
+        show_legend=True,
+        nan_aware=True,
+    )
+
+    # 2. Intrinsic reward curves
+    if int_metric:
+        plot_beta_curves(
+            best_runs_by_beta,
+            sorted_betas,
+            "int_values",
+            int_metric,
+            args.output_dir / "best_by_beta_intrinsic_curves.png",
+            args.smooth,
+            y_lim=int_ylim,
+            show_legend=True,
+            nan_aware=True,
+        )
+
+
 def main(args: Args):
     args.output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Seed-grouping mode (one folder per (hyperparam, seed)) takes its own path
+    # and only produces the extrinsic + intrinsic reward curves.
+    if args.group_seeds:
+        _main_grouped(args)
+        return
 
     run_folders = [d for d in args.root_dir.iterdir() if d.is_dir()]
 
