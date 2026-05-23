@@ -1,9 +1,9 @@
 #!/bin/bash
-#SBATCH --account=rrg-mbowling-ad
+#SBATCH --account=aip-mbowling
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=31GB
+#SBATCH --mem=16GB
 #SBATCH --time=02:59:00
-#SBATCH --gpus=h100_2g.20gb:1
+#SBATCH --gpus=1
 #SBATCH --mail-user=slakins@ualberta.ca
 #SBATCH --mail-type=ALL
 

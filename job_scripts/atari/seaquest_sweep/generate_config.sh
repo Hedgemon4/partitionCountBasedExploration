@@ -13,7 +13,7 @@ output_file="configs.txt"
 for seed in "${seeds[@]}"; do
     for beta in "${betas[@]}"; do
         for next in "${next_state[@]}"; do
-            echo "--environment freeway --force-xla --beta $beta --network.next_state_coef $next --seed $seed --output-folder-name freeway_sweep/run_$counter" >>"$output_file"
+            echo "--environment seaquest --force-xla --beta $beta --network.next_state_coef $next --seed $seed --output-folder-name seaquest_sweep/run_$counter" >>"$output_file"
             ((counter++))
         done
     done
