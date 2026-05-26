@@ -2,7 +2,7 @@
 #SBATCH --account=aip-mbowling
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16GB
-#SBATCH --time=08:59:00
+#SBATCH --time=02:59:00
 #SBATCH --gpus=1
 #SBATCH --mail-user=slakins@ualberta.ca
 #SBATCH --mail-type=ALL
