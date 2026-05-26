@@ -316,7 +316,7 @@ class AtariConfig:
     environment: str = "pong"
     num_environments: int = 128
     num_steps: int = 32
-    total_time_steps: float = 5e7
+    total_time_steps: float = 1e8
     framestack: int = 4
     force_xla: bool = False
 

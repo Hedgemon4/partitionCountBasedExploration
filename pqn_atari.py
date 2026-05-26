@@ -398,7 +398,7 @@ def make_run(args):
 
 ConfigOptions = Union[
     Annotated[
-        configs.AtariCountsConfig,
+        configs.AtariConfig,
         tyro.conf.subcommand(name="pong"),
     ]
 ]
@@ -407,7 +407,7 @@ ConfigOptions = Union[
 if __name__ == "__main__":
     args = tyro.cli(
         ConfigOptions,
-        default=configs.AtariCountsConfig(),
+        default=configs.AtariConfig(),
         config=(tyro.conf.CascadeSubcommandArgs,),
     )
 
