@@ -24,6 +24,8 @@ from wrappers import (
     FlattenObservationWrapper,
     LogWrapper,
     PessimisticMountainCarWrapper,
+    AutoResetEnvWrapper,
+    OptimisticResetVecEnvWrapper,
 )
 
 """
@@ -72,6 +74,10 @@ def make_env(args, episode_length):
     if environment_name == "MountainCar-v0" and args.pessimistic:
         print("Using pessimistic wrapper for MountainCar")
         env = PessimisticMountainCarWrapper(env)
+    
+    if "craftax" in environment_name.lower():
+        env = AutoResetEnvWrapper(env)
+        
     env = LogWrapper(env)
     vmap_reset = lambda num_envs: lambda random_key: jax.vmap(
         env.reset, in_axes=(0, None)
