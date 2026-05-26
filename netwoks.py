@@ -10,6 +10,8 @@ from configs.networks import (
     QNetworkCartpole as QNetworkCartpoleConfig,
     QNetworkCounts as QNetworkCountsConfig,
     QNetworkCountsWithNextStatePrediction as QNetworkCountsWithNextStatePredictionConfig,
+    QNetworkCraftax as QNetworkCraftaxConfig,
+    QNetworkCraftaxCounts as QNetworkCraftaxCountsConfig,
 )
 
 
@@ -376,4 +378,20 @@ def make_network(input_size, num_actions, key, network_config):
             key=key,
             network_config=network_config,
         )
+    elif isinstance(network_config, QNetworkCraftaxCountsConfig):
+        return QNetworkCounts(
+            input_size=input_size,
+            num_actions=num_actions,
+            key=key,
+            network_config=network_config,
+        )
+    
+    elif isinstance(network_config, QNetworkCraftaxConfig):
+        return QNetwork(
+            input_size=input_size,
+            num_actions=num_actions,
+            key=key,
+            network_config=network_config,
+        )
+
     raise ValueError(f"Unknown network config: {type(network_config)}")

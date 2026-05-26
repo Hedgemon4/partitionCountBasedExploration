@@ -549,7 +549,7 @@ ConfigOptions = Union[
         tyro.conf.subcommand(name="mountaincar_states"),
     ],
     Annotated[
-        configs.PQNCraftaxConfig,
+        configs.PQNCraftaxCountsConfig,
         tyro.conf.subcommand(name='craftax')
     ]
 ]

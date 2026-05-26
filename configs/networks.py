@@ -43,6 +43,22 @@ class QNetworkCounts(BaseNetworkConfig):
         default_factory=lambda: [FTABlock(), Block()]
     )
 
+@dataclasses.dataclass(frozen=True)
+class QNetworkCraftaxCounts(BaseNetworkConfig):
+    type: Literal["q_network_craftax_counts"] = "q_network_craftax_counts"
+    count_layer: int = 1
+    blocks: list[Block] = dataclasses.field(
+        default_factory=lambda: [FTABlock(), Block(), Block(), Block()]
+    )
+
+@dataclasses.dataclass(frozen=True)
+class QNetworkCraftax(BaseNetworkConfig):
+    type: Literal["q_network_craftax_counts"] = "q_network_craftax_counts"
+    count_layer: int = 1
+    blocks: list[Block] = dataclasses.field(
+        default_factory=lambda: [Block(), Block(), Block(), Block()]
+    )
+
 
 @dataclasses.dataclass(frozen=True)
 class QNetworkCountsWithNextStatePrediction(BaseNetworkConfig):
@@ -62,4 +78,5 @@ NetworkConfig = Union[
     QNetworkCounts,
     QNetworkCountsWithNextStatePrediction,
     BaseNetworkConfig,
+    QNetworkCraftaxCounts,
 ]

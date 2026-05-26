@@ -9,6 +9,8 @@ from configs.networks import (
     QNetwork,
     QNetworkCartpole,
     QNetworkCountsWithNextStatePrediction,
+    QNetworkCraftaxCounts,
+    QNetworkCraftax,
 )
 
 
@@ -289,17 +291,17 @@ class MountainCarWithIntrinsicRewardsAndStatePredictionConfig(BaseConfig):
 
 
 @chex.dataclass(frozen=True)
-class PQNCraftaxConfig(BaseConfig):
+class PQNCraftaxCountsConfig(BaseConfig):
     # Experiment Configs
     output_folder_name: str = "pqn_craftax"
     log_observations: bool = False
-    num_seeds = 10
+    num_seeds = 1
 
     # Algorithm Configs
     initial_learning_rate: float = 0.004
     final_learning_rate: float = 0.004
-    num_epochs: int = 8
-    num_minibatches: int = 16
+    num_epochs: int = 1
+    num_minibatches: int = 1
     gamma: float = 0.99
     lambda_returns: bool = False
     lam: float = 0.
@@ -312,7 +314,7 @@ class PQNCraftaxConfig(BaseConfig):
     episode_length: int = None
     num_environments: int = 1024
     num_steps: int = 1
-    total_time_steps: float = 1e4
+    total_time_steps: float = 1e9
 
     # Exploration Configs
     beta: float = 0.5
@@ -321,4 +323,40 @@ class PQNCraftaxConfig(BaseConfig):
     epsilon_decay: float = 0.2
 
     # Network Activation Configs
-    network: NetworkConfig = QNetworkCounts()
+    network: NetworkConfig = QNetworkCraftaxCounts()
+
+
+@chex.dataclass(frozen=True)
+class PQNCraftaxConfig(BaseConfig):
+    # Experiment Configs
+    output_folder_name: str = "pqn_craftax"
+    log_observations: bool = False
+    num_seeds = 1
+
+    # Algorithm Configs
+    initial_learning_rate: float = 0.004
+    final_learning_rate: float = 0.004
+    num_epochs: int = 1
+    num_minibatches: int = 1
+    gamma: float = 0.99
+    lambda_returns: bool = False
+    lam: float = 0.
+    max_grad_norm: float = 1.0
+    reward_scale: float = 1.0
+    sarsa_returns: bool = True
+
+    # Env Configs
+    environment: str = "Craftax-Symbolic-v1"
+    episode_length: int = None
+    num_environments: int = 1024
+    num_steps: int = 1
+    total_time_steps: float = 1e9
+
+    # Exploration Configs
+    beta: float = 0.5
+    epsilon_start: float = 0.1
+    epsilon_end: float = 0.005
+    epsilon_decay: float = 0.2
+
+    # Network Activation Configs
+    network: NetworkConfig = QNetworkCraftax()
