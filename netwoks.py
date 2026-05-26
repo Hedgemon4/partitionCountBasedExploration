@@ -4,7 +4,7 @@ from jax import Array
 import jax.numpy as jnp
 from jax.nn import one_hot
 
-from activations import make_activation
+from layers import make_activation, ChannelsLayerNorm
 from configs.networks import (
     QNetwork as QNetworkConfig,
     QNetworkCartpole as QNetworkCartpoleConfig,
@@ -382,6 +382,7 @@ class QNetworkCNNCounts(QNetworkCounts):
                 padding=network_config.padding,
                 key=keys[1],
             ),
+            ChannelsLayerNorm(32),
             eqx.nn.Lambda(jax.nn.relu),
             eqx.nn.Conv2d(
                 in_channels=32,
@@ -391,6 +392,7 @@ class QNetworkCNNCounts(QNetworkCounts):
                 padding=network_config.padding,
                 key=keys[2],
             ),
+            ChannelsLayerNorm(64),
             eqx.nn.Lambda(jax.nn.relu),
             eqx.nn.Conv2d(
                 in_channels=64,
@@ -400,6 +402,7 @@ class QNetworkCNNCounts(QNetworkCounts):
                 padding=network_config.padding,
                 key=keys[3],
             ),
+            ChannelsLayerNorm(64),
             eqx.nn.Lambda(jax.nn.relu),
             eqx.nn.Lambda(jnp.ravel),
         ]
@@ -510,6 +513,7 @@ class QNetworkCNN(QNetwork):
                 padding=network_config.padding,
                 key=keys[1],
             ),
+            ChannelsLayerNorm(32),
             eqx.nn.Lambda(jax.nn.relu),
             eqx.nn.Conv2d(
                 in_channels=32,
@@ -519,6 +523,7 @@ class QNetworkCNN(QNetwork):
                 padding=network_config.padding,
                 key=keys[2],
             ),
+            ChannelsLayerNorm(64),
             eqx.nn.Lambda(jax.nn.relu),
             eqx.nn.Conv2d(
                 in_channels=64,
@@ -528,6 +533,7 @@ class QNetworkCNN(QNetwork):
                 padding=network_config.padding,
                 key=keys[3],
             ),
+            ChannelsLayerNorm(64),
             eqx.nn.Lambda(jax.nn.relu),
             eqx.nn.Lambda(jnp.ravel),
         ]

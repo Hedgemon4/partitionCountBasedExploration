@@ -99,3 +99,13 @@ def make_activation(config: BaseActivationConfig):
     elif isinstance(config, Relu):
         return eqx.nn.Lambda(jax.nn.relu)
     raise ValueError(f"Unknown config: {type(config)}")
+
+
+class ChannelsLayerNorm(eqx.Module):
+    norm: eqx.nn.LayerNorm
+
+    def __init__(self, num_inputs):
+        self.norm = eqx.nn.LayerNorm(shape=num_inputs)
+
+    def __call__(self, x):
+        return jax.vmap(jax.vmap(self.norm, in_axes=1, out_axes=1), in_axes=2, out_axes=2)(x)
