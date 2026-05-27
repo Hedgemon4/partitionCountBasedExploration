@@ -39,6 +39,7 @@ def _count_histogram_helpers():
         aggregate_counts,
     )
 
+
 # Snapshot subdirectories written by pqn_with_counts.py when
 # count_save_timestep_interval > 0. Each directory contains one .npy file
 # per saved boundary timestep, named {prefix}_timestep_{N}.npy.
@@ -557,9 +558,7 @@ def _plot_count_histograms(top_results, args: Args):
     A combined side-by-side plot with a shared y-axis is also produced so
     runs can be compared directly.
     """
-    plot_histogram_with_actions, plot_neuron_summary, _, _ = (
-        _count_histogram_helpers()
-    )
+    plot_histogram_with_actions, plot_neuron_summary, _, _ = _count_histogram_helpers()
 
     hist_dir = args.output_dir / "count_histograms"
     hist_dir.mkdir(parents=True, exist_ok=True)

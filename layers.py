@@ -108,4 +108,6 @@ class ChannelsLayerNorm(eqx.Module):
         self.norm = eqx.nn.LayerNorm(shape=num_inputs)
 
     def __call__(self, x):
-        return jax.vmap(jax.vmap(self.norm, in_axes=1, out_axes=1), in_axes=2, out_axes=2)(x)
+        return jax.vmap(
+            jax.vmap(self.norm, in_axes=1, out_axes=1), in_axes=2, out_axes=2
+        )(x)

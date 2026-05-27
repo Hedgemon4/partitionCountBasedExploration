@@ -76,6 +76,7 @@ def make_env(args):
             num_envs=args.num_environments,
             seed=args.seed,
             stack_num=args.framestack,
+            episodic_life=args.episodic_life,
         ),
         None,
     )

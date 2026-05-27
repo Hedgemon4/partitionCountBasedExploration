@@ -318,6 +318,7 @@ class AtariConfig:
     num_steps: int = 32
     total_time_steps: float = 1e8
     framestack: int = 4
+    episodic_life: bool = False
     force_xla: bool = False
 
     # Exploration Configs
@@ -357,6 +358,7 @@ class AtariCountsConfig:
     num_steps: int = 32
     total_time_steps: float = 5e7
     framestack: int = 4
+    episodic_life: bool = False
     force_xla: bool = False
 
     # Exploration Configs

@@ -237,21 +237,19 @@ def build_grouped_runs(
 
         # Optional pre-grouping filters on non-varied config keys.
         if config_filters:
-            mismatch = any(
-                flat.get(k) != v for k, v in config_filters.items()
-            )
+            mismatch = any(flat.get(k) != v for k, v in config_filters.items())
             if mismatch:
                 n_skipped_filtered += 1
                 continue
 
         group_values = tuple(flat.get(k) for k in group_keys)
         seed = flat.get(seed_key)
-        members.setdefault(group_values, []).append(
-            (seed, folder, flat, metrics_path)
-        )
+        members.setdefault(group_values, []).append((seed, folder, flat, metrics_path))
 
     grouped_runs: List[GroupedRun] = []
-    for group_values in sorted(members.keys(), key=lambda gv: [_sort_key(v) for v in gv]):
+    for group_values in sorted(
+        members.keys(), key=lambda gv: [_sort_key(v) for v in gv]
+    ):
         entries = members[group_values]
         # Order members by seed so seed rows are deterministic.
         entries.sort(key=lambda e: _sort_key(e[0]))
@@ -332,7 +330,9 @@ def build_grouped_runs(
         if n_skipped_no_metrics:
             print(f"[grouping]   ({n_skipped_no_metrics} folders had no metrics.npz)")
         if n_skipped_filtered:
-            print(f"[grouping]   ({n_skipped_filtered} folders dropped by config filters)")
+            print(
+                f"[grouping]   ({n_skipped_filtered} folders dropped by config filters)"
+            )
         for g in grouped_runs:
             print(f"[grouping]   {format_group_label(g)}")
 
