@@ -10,7 +10,7 @@ output_file="configs.txt"
 >"$output_file"
 for seed in "${seeds[@]}"; do
     for sarsa in "${use_sarsa[@]}"; do
-        echo "--environment seaquest --episodic-life --$sarsa --force-xla --seed $seed --output-folder-name seaquest_baseline/run_$counter" >>"$output_file"
+        echo "--environment seaquest --episodic-life --$sarsa --force-xla --seed $seed --output-folder-name seaquest_baseline_episodic_life/run_$counter" >>"$output_file"
         ((counter++))
     done
 done
