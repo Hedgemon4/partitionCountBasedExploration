@@ -158,6 +158,7 @@ class ALEGymnaxWrapperXLA:
             env_name,
             num_envs=num_envs,
             autoreset_mode=AutoresetMode.SAME_STEP,
+            reward_clipping=False,
             **kwargs,
         )
         self.init_handle, self._reset, self._step = self._env.xla()
@@ -216,8 +217,11 @@ class ALEGymnaxWrapperXLA:
         info["returned_episode_lengths"] = state.returned_episode_lengths
         info["timestep"] = state.timestep
         info["returned_episode"] = done
+        info["reward"] = reward
 
-        return obs, next_state, reward, done, info
+        clipped_reward = jnp.clip(reward, -1.0, 1.0)
+
+        return obs, next_state, clipped_reward, done, info
 
     def observation_space(self, params: Optional[environment.EnvParams] = None):
         obs_space = cast(Any, self._env.observation_space)
@@ -243,6 +247,7 @@ class ALEGymnaxWrapperStandard:
             env_name,
             num_envs=num_envs,
             autoreset_mode=AutoresetMode.SAME_STEP,
+            reward_clipping=False,
             **kwargs,
         )
         self._env.reset(seed=seed)
@@ -306,8 +311,11 @@ class ALEGymnaxWrapperStandard:
         info["returned_episode_lengths"] = state.returned_episode_lengths
         info["timestep"] = state.timestep
         info["returned_episode"] = done
+        info["reward"] = reward
 
-        return obs, next_state, reward, done, info
+        clipped_reward = jnp.clip(reward, -1.0, 1.0)
+
+        return obs, next_state, clipped_reward, done, info
 
     def _step_callback(
         self, action: chex.Array
