@@ -192,21 +192,22 @@ class ALEGymnaxWrapperXLA:
 
         handle, (obs, reward, term, trunc, info) = self._step(state.handle, action)
         done = term | trunc
+        real_done = jnp.logical_or(jnp.logical_and(term, info["lives"] == 0), trunc)
 
         new_episode_return = state.episode_returns + reward
         new_episode_length = state.episode_lengths + 1
 
         next_state = LogEnvStateAtari(
             handle=handle,
-            episode_returns=(new_episode_return) * (1 - done),
-            episode_lengths=(new_episode_length) * (1 - done),
+            episode_returns=(new_episode_return) * (1 - real_done),
+            episode_lengths=(new_episode_length) * (1 - real_done),
             returned_episode_returns=jnp.where(
-                done,
+                real_done,
                 new_episode_return,
                 state.returned_episode_returns,
             ),
             returned_episode_lengths=jnp.where(
-                done,
+                real_done,
                 new_episode_length,
                 state.returned_episode_lengths,
             ),
@@ -216,7 +217,7 @@ class ALEGymnaxWrapperXLA:
         info["returned_episode_returns"] = state.returned_episode_returns
         info["returned_episode_lengths"] = state.returned_episode_lengths
         info["timestep"] = state.timestep
-        info["returned_episode"] = done
+        info["returned_episode"] = real_done
         info["reward"] = reward
 
         clipped_reward = jnp.clip(reward, -1.0, 1.0)
@@ -280,26 +281,28 @@ class ALEGymnaxWrapperStandard:
             action = jnp.expand_dims(action, axis=0)
 
         # Use pure_callback to call non-JAX ale_py from inside JIT
-        obs, reward, term, trunc = self._step_callback(action)
+        obs, reward, term, trunc, lives = self._step_callback(action)
         reward = jnp.atleast_1d(jnp.asarray(reward, dtype=jnp.float32))
         term = jnp.atleast_1d(jnp.asarray(term, dtype=jnp.float32))
         trunc = jnp.atleast_1d(jnp.asarray(trunc, dtype=jnp.float32))
         done = jnp.logical_or(term, trunc)
+
+        real_done = jnp.logical_or(jnp.logical_and(term, lives == 0), trunc)
 
         new_episode_return = state.episode_returns + reward
         new_episode_length = state.episode_lengths + 1
 
         next_state = LogEnvStateAtari(
             handle=None,
-            episode_returns=(new_episode_return) * (1 - done),
-            episode_lengths=(new_episode_length) * (1 - done),
+            episode_returns=(new_episode_return) * (1 - real_done),
+            episode_lengths=(new_episode_length) * (1 - real_done),
             returned_episode_returns=jnp.where(
-                done,
+                real_done,
                 new_episode_return,
                 state.returned_episode_returns,
             ),
             returned_episode_lengths=jnp.where(
-                done,
+                real_done,
                 new_episode_length,
                 state.returned_episode_lengths,
             ),
@@ -310,7 +313,7 @@ class ALEGymnaxWrapperStandard:
         info["returned_episode_returns"] = state.returned_episode_returns
         info["returned_episode_lengths"] = state.returned_episode_lengths
         info["timestep"] = state.timestep
-        info["returned_episode"] = done
+        info["returned_episode"] = real_done
         info["reward"] = reward
 
         clipped_reward = jnp.clip(reward, -1.0, 1.0)
@@ -324,27 +327,28 @@ class ALEGymnaxWrapperStandard:
         obs_space = cast(Any, self._env.observation_space)
         obs_shape = obs_space.shape
 
-        obs, rew, term, trunc = jax.pure_callback(
+        obs, rew, term, trunc, lives = jax.pure_callback(
             lambda a: self._step_callback_impl(a),
             (
                 jax.ShapeDtypeStruct(obs_shape, dtype=np.uint8),
                 jax.ShapeDtypeStruct((self.num_envs,), dtype=np.float32),
                 jax.ShapeDtypeStruct((self.num_envs,), dtype=np.bool_),
                 jax.ShapeDtypeStruct((self.num_envs,), dtype=np.bool_),
+                jax.ShapeDtypeStruct((self.num_envs,), dtype=np.int32),
             ),
             action,
         )
 
-        return obs, rew, term, trunc
+        return obs, rew, term, trunc, lives
 
     def _step_callback_impl(
         self, action: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Implementation of step callable from pure_callback."""
         action_np = np.asarray(action)
-        obs, rew, term, trunc, _ = self._env.step(action_np)
+        obs, rew, term, trunc, info = self._env.step(action_np)
         rew = np.asarray(rew, dtype=np.float32)
-        return obs, rew, term, trunc
+        return obs, rew, term, trunc, info["lives"]
 
     def observation_space(self, params: Optional[environment.EnvParams] = None):
         obs_space = cast(Any, self._env.observation_space)
