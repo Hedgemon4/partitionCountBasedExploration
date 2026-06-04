@@ -362,12 +362,15 @@ def _main_grouped(args: Args):
     from sweep_grouping import build_grouped_runs, filter_by_config
 
     ext_metric, int_metric = _resolve_reward_metrics(args)
-    metric_names = [ext_metric] + ([int_metric] if int_metric else [])
 
+    # Extrinsic is required; intrinsic is optional so baseline runs (no
+    # intrinsic-reward logging) survive grouping. `sarsa_returns` is part of
+    # the key so SARSA and Q-learning runs don't get merged into one group.
     groups = build_grouped_runs(
         args.root_dir,
-        group_keys=("beta", "network.next_state_coef"),
-        metric_names=tuple(metric_names),
+        group_keys=("beta", "network.next_state_coef", "sarsa_returns"),
+        metric_names=(ext_metric,),
+        optional_metric_names=(int_metric,) if int_metric else (),
     )
     if not groups:
         print("No grouped runs found — check --root-dir.")

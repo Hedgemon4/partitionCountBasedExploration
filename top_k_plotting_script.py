@@ -56,12 +56,12 @@ _TIMESTEP_RE = re.compile(r"_timestep_(\d+)\.npy$")
 class Args:
     """Analyze and plot specific runs from a large hyperparameter sweep."""
 
-    root_dir: Path = Path("data/mountaincar_bounds_sweep")
-    metric: str = "length_ema"
+    root_dir: Path = Path("data/seaquest_baseline_episodic_life")
+    metric: str = "returned_episode_returns"
     intrinsic_metric: str = "intrinsic_return_ema"
-    top_k: int = 10
+    top_k: int = 2
     smooth: int = 1
-    output_dir: Path = Path("graphs/mountaincar_bounds_sweep/top_10/last_1pct/")
+    output_dir: Path = Path("graphs/seaquest_baseline_episodic_life/returned_episode/")
 
     # --- SCORING PARAMETERS ---
     score_metric: str = "last_10pct"
@@ -75,7 +75,7 @@ class Args:
     reverse: bool = False
     plot_extra: bool = False
 
-    group_seeds: bool = False
+    group_seeds: bool = True
     """Seed-grouping mode for sweeps that write ONE folder per
     (hyperparameter, seed) combination — e.g. data/freeway_sweep, where each
     metrics.npz holds 1-D arrays for a single seed.
@@ -112,6 +112,7 @@ class Args:
     learnable_norm: Optional[bool] = None
     total_time_steps: Optional[float] = None
     next_state_coef: Optional[float] = None
+    use_sarsa: Optional[bool] = None
 
     # --- PLOT PARAMETERS ---
     y_lim: Optional[Tuple[float, float]] = (100, 200)
@@ -354,12 +355,18 @@ def _main_grouped(args: Args):
     from sweep_grouping import build_grouped_runs, filter_by_config, format_group_label
 
     ext_metric, int_metric = _resolve_reward_metrics(args)
-    metric_names = [ext_metric] + ([int_metric] if int_metric else [])
 
+    # Extrinsic reward is required; intrinsic is optional so baseline runs
+    # (no intrinsic-reward logging) can be compared alongside exploration runs
+    # in the same sweep without being dropped at grouping time.
+    # `sarsa_returns` is part of the grouping key so SARSA and Q-learning
+    # baselines stay in separate groups instead of being merged (which would
+    # otherwise collapse two different algorithms into one mean-CI band).
     groups = build_grouped_runs(
         args.root_dir,
-        group_keys=("beta", "network.next_state_coef"),
-        metric_names=tuple(metric_names),
+        group_keys=("beta", "network.next_state_coef", "sarsa_returns"),
+        metric_names=(ext_metric,),
+        optional_metric_names=(int_metric,) if int_metric else (),
     )
     if not groups:
         print("No grouped runs found — check --root-dir.")
@@ -420,23 +427,32 @@ def _main_grouped(args: Args):
     )
     print(f"  saved {args.output_dir / 'filtered_learning_curves.png'}")
 
-    # 2. Intrinsic reward curves
+    # 2. Intrinsic reward curves — only the groups that actually logged the
+    #    intrinsic metric. Baseline groups (no intrinsic reward) are silently
+    #    omitted from this plot but still appear in the extrinsic plot above.
     if int_metric:
         intrinsic_res = [
             {"name": r["name"], "steps": r["steps"], "values": r["int_values"]}
             for r in top_results
+            if r["int_values"] is not None
         ]
-        plot_curves(
-            intrinsic_res,
-            int_metric,
-            args.output_dir / "intrinsic_reward_curves.png",
-            f"Intrinsic Reward — Top {len(top_results)} groups",
-            args.smooth,
-            y_lim=int_ylim,
-            show_legend=True,
-            nan_aware=True,
-        )
-        print(f"  saved {args.output_dir / 'intrinsic_reward_curves.png'}")
+        if intrinsic_res:
+            plot_curves(
+                intrinsic_res,
+                int_metric,
+                args.output_dir / "intrinsic_reward_curves.png",
+                f"Intrinsic Reward — Top {len(intrinsic_res)} groups with "
+                f"{int_metric}",
+                args.smooth,
+                y_lim=int_ylim,
+                show_legend=True,
+                nan_aware=True,
+            )
+            print(f"  saved {args.output_dir / 'intrinsic_reward_curves.png'}")
+        else:
+            print(
+                f"  no groups had '{int_metric}' — skipping intrinsic reward plot"
+            )
 
 
 def main(args: Args):

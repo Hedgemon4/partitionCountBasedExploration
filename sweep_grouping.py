@@ -174,6 +174,7 @@ def build_grouped_runs(
     seed_key: str = "seed",
     config_filters: Optional[Dict[str, Any]] = None,
     verbose: bool = True,
+    optional_metric_names: Sequence[str] = (),
 ) -> List[GroupedRun]:
     """Scan ``root_dir`` and merge single-seed folders into :class:`GroupedRun`s.
 
@@ -187,8 +188,9 @@ def build_grouped_runs(
         Runs that agree on all of these are merged; ``seed`` is what varies
         within a group.
     metric_names
-        Metrics to load and stack. Each becomes a ``(n_seeds, n_timesteps)``
-        entry in :attr:`GroupedRun.metrics`.
+        Required metrics to load and stack. Each becomes a
+        ``(n_seeds, n_timesteps)`` entry in :attr:`GroupedRun.metrics`. A seed
+        whose ``metrics.npz`` is missing any required metric is skipped.
     step_key
         The npz key holding the x-axis (environment step) values.
     seed_key
@@ -198,6 +200,13 @@ def build_grouped_runs(
         any entry are skipped before grouping.
     verbose
         Print a short grouping summary.
+    optional_metric_names
+        Metrics to load if present, but not required. Seeds missing these
+        metrics are kept (not skipped). At the group level the metric is only
+        included in :attr:`GroupedRun.metrics` when every kept seed in the
+        group has it; otherwise the key is simply absent from the group. Use
+        this for metrics like ``intrinsic_return_ema`` that only exist on a
+        subset of runs (e.g. exploration vs. baselines).
 
     Returns
     -------
@@ -213,6 +222,7 @@ def build_grouped_runs(
 
     group_keys = tuple(group_keys)
     metric_names = tuple(metric_names)
+    optional_metric_names = tuple(optional_metric_names)
 
     # members[group_values] -> list of (seed, folder, flat_config, metrics_path)
     members: Dict[Tuple[Any, ...], List[Tuple[Any, Path, Dict[str, Any], Path]]] = {}
@@ -259,7 +269,13 @@ def build_grouped_runs(
         rep_config = entries[0][2]
 
         # --- Collect per-seed rows for every requested metric ----------------
+        # Required metrics — a seed missing any of these is dropped from the
+        # group. Optional metrics are loaded if present, otherwise left absent
+        # for that seed and resolved later at the group level.
         per_metric_rows: Dict[str, List[np.ndarray]] = {m: [] for m in metric_names}
+        per_optional_rows: Dict[str, List[Optional[np.ndarray]]] = {
+            m: [] for m in optional_metric_names
+        }
         step_rows: List[np.ndarray] = []
         kept_seeds: List[Any] = []
         kept_folders: List[Path] = []
@@ -290,6 +306,10 @@ def build_grouped_runs(
             step_rows.append(step_arr)
             for m in metric_names:
                 per_metric_rows[m].append(metric_arrs[m])
+            for m in optional_metric_names:
+                per_optional_rows[m].append(
+                    _seed_rows(npz[m]) if m in npz else None
+                )
             kept_seeds.append(seed)
             kept_folders.append(folder)
 
@@ -302,6 +322,10 @@ def build_grouped_runs(
         for rows in per_metric_rows.values():
             for r in rows:
                 lengths.append(r.shape[1])
+        for rows in per_optional_rows.values():
+            for r in rows:
+                if r is not None:
+                    lengths.append(r.shape[1])
         min_t = min(lengths)
 
         steps = step_rows[0][:min_t]
@@ -309,6 +333,19 @@ def build_grouped_runs(
         for m in metric_names:
             stacked = np.vstack([r[:, :min_t] for r in per_metric_rows[m]])
             metrics[m] = stacked
+        # Optional metrics: only include if every kept seed has them. Mixing
+        # would silently drop rows from the seed-aggregated curves and confuse
+        # downstream plotting (CIs, n_seeds, etc.).
+        for m in optional_metric_names:
+            rows = per_optional_rows[m]
+            if rows and all(r is not None for r in rows):
+                metrics[m] = np.vstack([r[:, :min_t] for r in rows])
+            elif any(r is not None for r in rows):
+                present = sum(r is not None for r in rows)
+                print(
+                    f"[grouping] group {group_values}: optional metric '{m}' "
+                    f"present in {present}/{len(rows)} seeds — omitting from group"
+                )
 
         grouped_runs.append(
             GroupedRun(
