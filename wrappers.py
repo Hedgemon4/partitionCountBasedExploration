@@ -148,6 +148,7 @@ class LogEnvStateAtari:
     returned_episode_returns: jax.Array
     returned_episode_lengths: jax.Array
     timestep: jax.Array
+    prev_episode_frame_number: jax.Array
 
 
 class ALEGymnaxWrapperXLA:
@@ -176,6 +177,7 @@ class ALEGymnaxWrapperXLA:
             returned_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
             returned_episode_lengths=jnp.zeros(self.num_envs, dtype=jnp.float32),
             timestep=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            prev_episode_frame_number=jnp.zeros(self.num_envs, dtype=jnp.int32),
         )
         return obs, env_state
 
@@ -192,7 +194,8 @@ class ALEGymnaxWrapperXLA:
 
         handle, (obs, reward, term, trunc, info) = self._step(state.handle, action)
         done = term | trunc
-        real_done = jnp.logical_or(jnp.logical_and(term, info["lives"] == 0), trunc)
+        efn = info["episode_frame_number"]
+        real_done = efn < state.prev_episode_frame_number
 
         new_episode_return = state.episode_returns + reward
         new_episode_length = state.episode_lengths + 1
@@ -212,6 +215,7 @@ class ALEGymnaxWrapperXLA:
                 state.returned_episode_lengths,
             ),
             timestep=state.timestep + 1,
+            prev_episode_frame_number=efn,
         )
 
         info["returned_episode_returns"] = state.returned_episode_returns
@@ -267,6 +271,7 @@ class ALEGymnaxWrapperStandard:
             returned_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
             returned_episode_lengths=jnp.zeros(self.num_envs, dtype=jnp.float32),
             timestep=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            prev_episode_frame_number=jnp.zeros(self.num_envs, dtype=jnp.int32),
         )
         return obs, env_state
 
@@ -281,13 +286,15 @@ class ALEGymnaxWrapperStandard:
             action = jnp.expand_dims(action, axis=0)
 
         # Use pure_callback to call non-JAX ale_py from inside JIT
-        obs, reward, term, trunc, lives = self._step_callback(action)
+        obs, reward, term, trunc, efn = self._step_callback(action)
         reward = jnp.atleast_1d(jnp.asarray(reward, dtype=jnp.float32))
         term = jnp.atleast_1d(jnp.asarray(term, dtype=jnp.float32))
         trunc = jnp.atleast_1d(jnp.asarray(trunc, dtype=jnp.float32))
         done = jnp.logical_or(term, trunc)
 
-        real_done = jnp.logical_or(jnp.logical_and(term, lives == 0), trunc)
+        # See XLA wrapper: detect the autoreset via episode_frame_number dropping.
+        efn = jnp.atleast_1d(jnp.asarray(efn, dtype=jnp.int32))
+        real_done = efn < state.prev_episode_frame_number
 
         new_episode_return = state.episode_returns + reward
         new_episode_length = state.episode_lengths + 1
@@ -307,6 +314,7 @@ class ALEGymnaxWrapperStandard:
                 state.returned_episode_lengths,
             ),
             timestep=state.timestep + 1,
+            prev_episode_frame_number=efn,
         )
 
         info = {}  # Empty info dict for standard ale_py
@@ -327,7 +335,7 @@ class ALEGymnaxWrapperStandard:
         obs_space = cast(Any, self._env.observation_space)
         obs_shape = obs_space.shape
 
-        obs, rew, term, trunc, lives = jax.pure_callback(
+        obs, rew, term, trunc, efn = jax.pure_callback(
             lambda a: self._step_callback_impl(a),
             (
                 jax.ShapeDtypeStruct(obs_shape, dtype=np.uint8),
@@ -339,7 +347,7 @@ class ALEGymnaxWrapperStandard:
             action,
         )
 
-        return obs, rew, term, trunc, lives
+        return obs, rew, term, trunc, efn
 
     def _step_callback_impl(
         self, action: np.ndarray
@@ -348,7 +356,7 @@ class ALEGymnaxWrapperStandard:
         action_np = np.asarray(action)
         obs, rew, term, trunc, info = self._env.step(action_np)
         rew = np.asarray(rew, dtype=np.float32)
-        return obs, rew, term, trunc, info["lives"]
+        return obs, rew, term, trunc, info["episode_frame_number"]
 
     def observation_space(self, params: Optional[environment.EnvParams] = None):
         obs_space = cast(Any, self._env.observation_space)
