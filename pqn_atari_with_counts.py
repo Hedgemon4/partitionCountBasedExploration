@@ -91,6 +91,7 @@ def make_env(args):
             num_envs=args.num_environments,
             seed=args.seed,
             stack_num=args.framestack,
+            life_loss_info=args.life_loss_info,
         ),
         None,
     )
