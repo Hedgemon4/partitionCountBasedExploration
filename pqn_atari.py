@@ -222,7 +222,6 @@ def make_run(args):
 
             # Compute Targets
             if args.lambda_returns:
-                # TODO: These targets still might be wrong
                 def lambda_targets(carry, transition):
                     target, next_q = carry
                     updated_target = transition.reward + (
@@ -245,7 +244,12 @@ def make_run(args):
                     1 - transitions.done[-1]
                 )  # If done, then no q value
                 initial_return = transitions.reward[-1] + args.gamma * last_q_value
-                carry = (initial_return, last_q_value)
+                initial_next_q = (
+                    transitions.selected_q_value[-1, :]
+                    if args.sarsa_returns
+                    else jnp.max(transitions.all_q_values[-1, :], axis=-1)
+                )
+                carry = (initial_return, initial_next_q)
                 final_target_carry, targets = jax.lax.scan(
                     lambda_targets,
                     carry,
