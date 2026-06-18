@@ -14,6 +14,7 @@ import chex
 import yaml
 
 import configs.defaults as configs
+from env_registery import make
 from exploration import epsilon_greedy
 from helper_functions import update_ema
 from netwoks import QNetwork
@@ -46,7 +47,7 @@ class EMAMetrics:
 
 
 def make_env(environment_name, episode_length):
-    env, env_params = gymnax.make(environment_name)
+    env, env_params = make(environment_name)
     if episode_length is not None:
         env_params = env_params.replace(max_steps_in_episode=episode_length)
     env = FlattenObservationWrapper(env)
@@ -384,6 +385,10 @@ ConfigOptions = Union[
     Annotated[
         configs.PQNMountainCarConfig,
         tyro.conf.subcommand(name="mountaincar"),
+    ],
+    Annotated[
+        configs.PQNCraftaxConfig,
+        tyro.conf.subcommand(name="craftax"),
     ],
 ]
 
