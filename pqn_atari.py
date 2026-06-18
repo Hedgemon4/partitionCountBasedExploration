@@ -324,8 +324,6 @@ def make_run(args):
             epoch_key, epoch_params, epoch_opt_state = epoch_outs
             step_number += 1
 
-            ### TODO: Compute episode return metrics based on discussion with Mike
-
             metrics = {
                 "env_step": env_step,
                 "update_steps": step_number,

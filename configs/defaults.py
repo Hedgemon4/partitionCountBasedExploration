@@ -310,7 +310,7 @@ class AtariConfig:
     lam: float = 0.65
     max_grad_norm: float = 10.0
     reward_scale: float = 1.0
-    sarsa_returns: bool = True
+    sarsa_returns: bool = False
 
     # Env Configs
     environment: str = "pong"
@@ -350,7 +350,7 @@ class AtariCountsConfig:
     lam: float = 0.65
     max_grad_norm: float = 10.0
     reward_scale: float = 1.0
-    sarsa_returns: bool = True
+    sarsa_returns: bool = False
 
     # Env Configs
     environment: str = "pong"

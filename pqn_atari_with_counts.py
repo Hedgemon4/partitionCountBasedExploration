@@ -50,8 +50,10 @@ class Transition:
 @chex.dataclass(frozen=True)
 class EMAMetrics:
     ema_alpha: float
-    extrinsic_return_ema: float
-    intrinsic_return_ema: float
+    extrinsic_return_per_game_ema: float
+    extrinsic_return_per_life_ema: float
+    intrinsic_return_per_life_ema: float
+    intrinsic_return_per_game_ema: float
     episode_length_ema: float
 
 
@@ -59,6 +61,8 @@ class EMAMetrics:
 class IntrinsicRewardData:
     intrinsic_return: Array
     returned_intrinsic_return: Array
+    game_intrinsic_return: Array
+    returned_game_intrinsic_return: Array
 
 
 def make_env(args):
@@ -158,6 +162,8 @@ def make_run(args):
         initial_intrinsic_returns = IntrinsicRewardData(
             intrinsic_return=jnp.zeros_like(initial_selected_q),
             returned_intrinsic_return=jnp.zeros_like(initial_selected_q),
+            game_intrinsic_return=jnp.zeros_like(initial_selected_q),
+            returned_game_intrinsic_return=jnp.zeros_like(initial_selected_q),
         )
 
         initial_env_carry = (
@@ -173,8 +179,10 @@ def make_run(args):
 
         episode_metrics = EMAMetrics(
             ema_alpha=2 / (args.num_episodes_for_average + 1),
-            extrinsic_return_ema=jnp.nan,
-            intrinsic_return_ema=jnp.nan,
+            extrinsic_return_per_game_ema=jnp.nan,
+            extrinsic_return_per_life_ema=jnp.nan,
+            intrinsic_return_per_life_ema=jnp.nan,
+            intrinsic_return_per_game_ema=jnp.nan,
             episode_length_ema=jnp.nan,
         )
 
@@ -229,20 +237,25 @@ def make_run(args):
                 )
 
                 # Update intrinsic return metrics
-                new_intrinsic_return = (
-                    intrinsic_returns.intrinsic_return + intrinsic_reward
-                )
+                real_done = info["returned_episode"]
+                new_intrinsic_return = intrinsic_returns.intrinsic_return + intrinsic_reward
+                new_game_intrinsic_return = intrinsic_returns.game_intrinsic_return + intrinsic_reward
                 updated_intrinsic_returns = IntrinsicRewardData(
                     intrinsic_return=new_intrinsic_return * (1 - done),
-                    returned_intrinsic_return=intrinsic_returns.returned_intrinsic_return
-                    * (1 - done)
-                    + new_intrinsic_return * done,
+                    returned_intrinsic_return=(
+                        intrinsic_returns.returned_intrinsic_return * (1 - done)
+                        + new_intrinsic_return * done
+                    ),
+                    game_intrinsic_return=new_game_intrinsic_return * (1 - real_done),
+                    returned_game_intrinsic_return=(
+                        intrinsic_returns.returned_game_intrinsic_return * (1 - real_done)
+                        + new_game_intrinsic_return * real_done
+                    ),
                 )
 
                 # Add to info for logging
-                info["returned_intrinsic_returns"] = (
-                    updated_intrinsic_returns.returned_intrinsic_return
-                )
+                info["returned_intrinsic_returns"] = updated_intrinsic_returns.returned_intrinsic_return
+                info["returned_game_intrinsic_returns"] = updated_intrinsic_returns.returned_game_intrinsic_return
 
                 transition = Transition(
                     state=state,
@@ -408,27 +421,52 @@ def make_run(args):
             # Compute EMA of episode returns and lengths
 
             is_done = infos["returned_episode"]
-            extrinsic_episode_returns = infos["returned_episode_returns"]
-            intrinsic_episode_returns = infos["returned_intrinsic_returns"]
-            episode_lengths = infos["returned_episode_lengths"]
+            per_life_done = transitions.done
             num_dones = is_done.sum()
+            num_life_dones = per_life_done.sum()
 
-            mean_extrinsic_episode_return = jnp.sum(
+            extrinsic_episode_returns = infos["returned_episode_returns"]
+            life_extrinsic_returns = infos["life_returned_episode_returns"]
+            life_intrinsic_returns = infos["returned_intrinsic_returns"]
+            game_intrinsic_returns = infos["returned_game_intrinsic_returns"]
+            episode_lengths = infos["returned_episode_lengths"]
+
+            mean_extrinsic_per_game = jnp.sum(
                 is_done * extrinsic_episode_returns
             ) / jnp.maximum(num_dones, 1)
-            updated_extrinsic_return_ema = update_ema(
-                train_episode_metrics.extrinsic_return_ema,
-                mean_extrinsic_episode_return,
+            updated_extrinsic_per_game_ema = update_ema(
+                train_episode_metrics.extrinsic_return_per_game_ema,
+                mean_extrinsic_per_game,
                 num_dones,
                 train_episode_metrics.ema_alpha,
             )
 
-            mean_intrinsic_episode_return = jnp.sum(
-                is_done * intrinsic_episode_returns
+            mean_extrinsic_per_life = jnp.sum(
+                per_life_done * life_extrinsic_returns
+            ) / jnp.maximum(num_life_dones, 1)
+            updated_extrinsic_per_life_ema = update_ema(
+                train_episode_metrics.extrinsic_return_per_life_ema,
+                mean_extrinsic_per_life,
+                num_life_dones,
+                train_episode_metrics.ema_alpha,
+            )
+
+            mean_intrinsic_per_life = jnp.sum(
+                per_life_done * life_intrinsic_returns
+            ) / jnp.maximum(num_life_dones, 1)
+            updated_intrinsic_per_life_ema = update_ema(
+                train_episode_metrics.intrinsic_return_per_life_ema,
+                mean_intrinsic_per_life,
+                num_life_dones,
+                train_episode_metrics.ema_alpha,
+            )
+
+            mean_intrinsic_per_game = jnp.sum(
+                is_done * game_intrinsic_returns
             ) / jnp.maximum(num_dones, 1)
-            updated_intrinsic_return_ema = update_ema(
-                train_episode_metrics.intrinsic_return_ema,
-                mean_intrinsic_episode_return,
+            updated_intrinsic_per_game_ema = update_ema(
+                train_episode_metrics.intrinsic_return_per_game_ema,
+                mean_intrinsic_per_game,
                 num_dones,
                 train_episode_metrics.ema_alpha,
             )
@@ -446,14 +484,18 @@ def make_run(args):
             # Update train episode metrics
             updated_episode_metrics = EMAMetrics(
                 ema_alpha=train_episode_metrics.ema_alpha,
-                extrinsic_return_ema=updated_extrinsic_return_ema,
-                intrinsic_return_ema=updated_intrinsic_return_ema,
+                extrinsic_return_per_game_ema=updated_extrinsic_per_game_ema,
+                extrinsic_return_per_life_ema=updated_extrinsic_per_life_ema,
+                intrinsic_return_per_life_ema=updated_intrinsic_per_life_ema,
+                intrinsic_return_per_game_ema=updated_intrinsic_per_game_ema,
                 episode_length_ema=updated_episode_lengths_ema,
             )
 
-            metrics["extrinsic_return_ema"] = updated_extrinsic_return_ema
+            metrics["extrinsic_return_per_game_ema"] = updated_extrinsic_per_game_ema
+            metrics["extrinsic_return_per_life_ema"] = updated_extrinsic_per_life_ema
+            metrics["intrinsic_return_per_life_ema"] = updated_intrinsic_per_life_ema
+            metrics["intrinsic_return_per_game_ema"] = updated_intrinsic_per_game_ema
             metrics["length_ema"] = updated_episode_lengths_ema
-            metrics["intrinsic_return_ema"] = updated_intrinsic_return_ema
 
             # Capture count snapshots at this update step
             step_model = eqx.combine(epoch_params, static)

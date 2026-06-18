@@ -147,6 +147,8 @@ class LogEnvStateAtari:
     episode_lengths: jax.Array
     returned_episode_returns: jax.Array
     returned_episode_lengths: jax.Array
+    life_episode_returns: jax.Array
+    life_returned_episode_returns: jax.Array
     timestep: jax.Array
     prev_episode_frame_number: jax.Array
 
@@ -176,6 +178,8 @@ class ALEGymnaxWrapperXLA:
             episode_lengths=jnp.zeros(self.num_envs, dtype=jnp.float32),
             returned_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
             returned_episode_lengths=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            life_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            life_returned_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
             timestep=jnp.zeros(self.num_envs, dtype=jnp.float32),
             prev_episode_frame_number=jnp.zeros(self.num_envs, dtype=jnp.int32),
         )
@@ -199,6 +203,7 @@ class ALEGymnaxWrapperXLA:
 
         new_episode_return = state.episode_returns + reward
         new_episode_length = state.episode_lengths + 1
+        new_life_episode_return = state.life_episode_returns + reward
 
         next_state = LogEnvStateAtari(
             handle=handle,
@@ -214,12 +219,19 @@ class ALEGymnaxWrapperXLA:
                 new_episode_length,
                 state.returned_episode_lengths,
             ),
+            life_episode_returns=new_life_episode_return * (1 - done),
+            life_returned_episode_returns=jnp.where(
+                done,
+                new_life_episode_return,
+                state.life_returned_episode_returns,
+            ),
             timestep=state.timestep + 1,
             prev_episode_frame_number=efn,
         )
 
         info["returned_episode_returns"] = next_state.returned_episode_returns
         info["returned_episode_lengths"] = next_state.returned_episode_lengths
+        info["life_returned_episode_returns"] = next_state.life_returned_episode_returns
         info["timestep"] = state.timestep
         info["returned_episode"] = real_done
         info["reward"] = reward
@@ -270,6 +282,8 @@ class ALEGymnaxWrapperStandard:
             episode_lengths=jnp.zeros(self.num_envs, dtype=jnp.float32),
             returned_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
             returned_episode_lengths=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            life_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            life_returned_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
             timestep=jnp.zeros(self.num_envs, dtype=jnp.float32),
             prev_episode_frame_number=jnp.zeros(self.num_envs, dtype=jnp.int32),
         )
@@ -298,6 +312,7 @@ class ALEGymnaxWrapperStandard:
 
         new_episode_return = state.episode_returns + reward
         new_episode_length = state.episode_lengths + 1
+        new_life_episode_return = state.life_episode_returns + reward
 
         next_state = LogEnvStateAtari(
             handle=None,
@@ -313,6 +328,12 @@ class ALEGymnaxWrapperStandard:
                 new_episode_length,
                 state.returned_episode_lengths,
             ),
+            life_episode_returns=new_life_episode_return * (1 - done),
+            life_returned_episode_returns=jnp.where(
+                done,
+                new_life_episode_return,
+                state.life_returned_episode_returns,
+            ),
             timestep=state.timestep + 1,
             prev_episode_frame_number=efn,
         )
@@ -320,6 +341,7 @@ class ALEGymnaxWrapperStandard:
         info = {}  # Empty info dict for standard ale_py
         info["returned_episode_returns"] = next_state.returned_episode_returns
         info["returned_episode_lengths"] = next_state.returned_episode_lengths
+        info["life_returned_episode_returns"] = next_state.life_returned_episode_returns
         info["timestep"] = state.timestep
         info["returned_episode"] = real_done
         info["reward"] = reward
