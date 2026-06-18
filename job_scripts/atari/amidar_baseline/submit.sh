@@ -1,0 +1,36 @@
+#!/bin/bash
+#SBATCH --account=aip-mbowling
+#SBATCH --cpus-per-task=64
+#SBATCH --mem=32GB
+#SBATCH --time=08:59:00
+#SBATCH --gpus=1
+#SBATCH --mail-user=slakins@ualberta.ca
+#SBATCH --mail-type=ALL
+
+module load python/3.12.4
+module load gcc/12.3
+module load cuda/12.9
+module load opencv
+module load cmake
+
+virtualenv --no-download $SLURM_TMPDIR/env
+source $SLURM_TMPDIR/env/bin/activate
+python -m pip install --no-index --upgrade pip
+
+python -m pip install -U -r requirements.txt --no-index -f wheels/
+
+python -m pip install ale/ --no-index
+
+cp /home/slakins/scratch/projects/partitionCountBasedExploration/roms/*.bin $SLURM_TMPDIR/env/lib/python3.12/site-packages/ale_py/roms/
+
+for seed in 0 1 2 3 4 5 6 7 8 9; do
+    echo "Starting seed $seed"
+    XLA_PYTHON_CLIENT_MEM_FRACTION=0.08 python pqn_atari.py \
+        --environment amidar \
+        --force-xla \
+        --seed $seed \
+        --output-folder-name amidar_baseline/seed_$seed &
+done
+
+wait
+echo "All seeds finished"
