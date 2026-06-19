@@ -2,7 +2,7 @@
 #SBATCH --account=aip-mbowling
 #SBATCH --cpus-per-task=64
 #SBATCH --mem=32GB
-#SBATCH --time=08:59:00
+#SBATCH --time=02:59:00
 #SBATCH --gpus=1
 #SBATCH --mail-user=slakins@ualberta.ca
 #SBATCH --mail-type=ALL
@@ -29,7 +29,7 @@ for seed in 0 1 2 3 4 5 6 7 8 9; do
         --environment amidar \
         --force-xla \
         --seed $seed \
-        --output-folder-name amidar_baseline/seed_$seed &
+        --output-folder-name amidar_baseline_reduced_time/seed_$seed &
 done
 
 wait
