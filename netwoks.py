@@ -68,7 +68,6 @@ class QNetwork(eqx.Module):
                 key=keys[-1],
             )
         ]
-        print(self.blocks)
 
     def __call__(self, x):
         for layer in self.blocks:
@@ -507,7 +506,6 @@ class QNetworkCNN(QNetwork):
             raise ValueError("Unknown padding type")
 
         super().__init__(network_input, num_actions, keys[0], network_config)
-        print(f"Input size: {input_size}")
 
         self.cnn = [
             eqx.nn.Conv2d(
