@@ -307,9 +307,7 @@ def build_grouped_runs(
             for m in metric_names:
                 per_metric_rows[m].append(metric_arrs[m])
             for m in optional_metric_names:
-                per_optional_rows[m].append(
-                    _seed_rows(npz[m]) if m in npz else None
-                )
+                per_optional_rows[m].append(_seed_rows(npz[m]) if m in npz else None)
             kept_seeds.append(seed)
             kept_folders.append(folder)
 

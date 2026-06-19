@@ -80,6 +80,22 @@ class QNetworkCNNConfig(CNNNetworkConfig):
     )
 
 
+@dataclasses.dataclass(frozen=True)
+class QNetworkCNNFTAConfig(CNNNetworkConfig):
+    type: Literal["q_network_cnn"] = "q_network_cnn"
+    blocks: list[Block] = dataclasses.field(
+        default_factory=lambda: [FTABlock(hidden_size=512)]
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class QNetworkCNNTwoFTAConfig(CNNNetworkConfig):
+    type: Literal["q_network_cnn"] = "q_network_cnn"
+    blocks: list[Block] = dataclasses.field(
+        default_factory=lambda: [FTABlock(hidden_size=512), Block(hidden_size=512)]
+    )
+
+
 NetworkConfig = Union[
     QNetwork,
     QNetworkCartpole,
@@ -87,5 +103,7 @@ NetworkConfig = Union[
     QNetworkCountsWithNextStatePrediction,
     QNetworkCNNCountsConfig,
     QNetworkCNNConfig,
+    QNetworkCNNFTAConfig,
+    QNetworkCNNTwoFTAConfig,
     BaseNetworkConfig,
 ]

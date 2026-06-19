@@ -11,6 +11,8 @@ from configs.networks import (
     QNetworkCountsWithNextStatePrediction,
     QNetworkCNNCountsConfig,
     QNetworkCNNConfig,
+    QNetworkCNNFTAConfig,
+    QNetworkCNNTwoFTAConfig,
 )
 
 
@@ -328,6 +330,16 @@ class AtariConfig:
 
     # Network Activation Configs
     network: NetworkConfig = QNetworkCNNConfig()
+
+
+@chex.dataclass(frozen=True)
+class AtariFTAConfig(AtariConfig):
+    network: NetworkConfig = QNetworkCNNFTAConfig()
+
+
+@chex.dataclass(frozen=True)
+class AtariTwoFTAConfig(AtariConfig):
+    network: NetworkConfig = QNetworkCNNTwoFTAConfig()
 
 
 @chex.dataclass(frozen=True)

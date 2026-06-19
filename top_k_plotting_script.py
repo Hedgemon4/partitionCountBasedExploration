@@ -450,9 +450,7 @@ def _main_grouped(args: Args):
             )
             print(f"  saved {args.output_dir / 'intrinsic_reward_curves.png'}")
         else:
-            print(
-                f"  no groups had '{int_metric}' — skipping intrinsic reward plot"
-            )
+            print(f"  no groups had '{int_metric}' — skipping intrinsic reward plot")
 
 
 def main(args: Args):

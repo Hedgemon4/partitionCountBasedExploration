@@ -222,6 +222,7 @@ def make_run(args):
 
             # Compute Targets
             if args.lambda_returns:
+
                 def lambda_targets(carry, transition):
                     target, next_q = carry
                     updated_target = transition.reward + (
@@ -400,10 +401,9 @@ def make_run(args):
 
 
 ConfigOptions = Union[
-    Annotated[
-        configs.AtariConfig,
-        tyro.conf.subcommand(name="pong"),
-    ]
+    Annotated[configs.AtariConfig, tyro.conf.subcommand(name="pong")],
+    Annotated[configs.AtariFTAConfig, tyro.conf.subcommand(name="fta")],
+    Annotated[configs.AtariTwoFTAConfig, tyro.conf.subcommand(name="fta-two-layer")],
 ]
 
 

@@ -50,20 +50,25 @@ class QNetwork(eqx.Module):
             )
             activation = make_activation(block.activation)
             num_bins = getattr(activation, "num_bins", 1)
-
             self.blocks.append(activation)
 
             # Compute the number of input features for the next layer, which will be the hidden size times the number of bins for the current activation
             input_features = hidden_size * num_bins
             previous_bins = num_bins
 
+        value_head_input_size = blocks[-1].hidden_size
+        if previous_bins > 1:
+            self.blocks.append(eqx.nn.Lambda(jnp.ravel))
+            value_head_input_size *= previous_bins
+
         self.value_head = [
             eqx.nn.Linear(
-                in_features=blocks[-1].hidden_size,
+                in_features=value_head_input_size,
                 out_features=num_actions,
                 key=keys[-1],
             )
         ]
+        print(self.blocks)
 
     def __call__(self, x):
         for layer in self.blocks:

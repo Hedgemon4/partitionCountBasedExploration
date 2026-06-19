@@ -238,8 +238,12 @@ def make_run(args):
 
                 # Update intrinsic return metrics
                 real_done = info["returned_episode"]
-                new_intrinsic_return = intrinsic_returns.intrinsic_return + intrinsic_reward
-                new_game_intrinsic_return = intrinsic_returns.game_intrinsic_return + intrinsic_reward
+                new_intrinsic_return = (
+                    intrinsic_returns.intrinsic_return + intrinsic_reward
+                )
+                new_game_intrinsic_return = (
+                    intrinsic_returns.game_intrinsic_return + intrinsic_reward
+                )
                 updated_intrinsic_returns = IntrinsicRewardData(
                     intrinsic_return=new_intrinsic_return * (1 - done),
                     returned_intrinsic_return=(
@@ -248,14 +252,19 @@ def make_run(args):
                     ),
                     game_intrinsic_return=new_game_intrinsic_return * (1 - real_done),
                     returned_game_intrinsic_return=(
-                        intrinsic_returns.returned_game_intrinsic_return * (1 - real_done)
+                        intrinsic_returns.returned_game_intrinsic_return
+                        * (1 - real_done)
                         + new_game_intrinsic_return * real_done
                     ),
                 )
 
                 # Add to info for logging
-                info["returned_intrinsic_returns"] = updated_intrinsic_returns.returned_intrinsic_return
-                info["returned_game_intrinsic_returns"] = updated_intrinsic_returns.returned_game_intrinsic_return
+                info["returned_intrinsic_returns"] = (
+                    updated_intrinsic_returns.returned_intrinsic_return
+                )
+                info["returned_game_intrinsic_returns"] = (
+                    updated_intrinsic_returns.returned_game_intrinsic_return
+                )
 
                 transition = Transition(
                     state=state,
@@ -300,6 +309,7 @@ def make_run(args):
 
             # Compute Targets
             if args.lambda_returns:
+
                 def lambda_targets(carry, transition):
                     target, next_q = carry
                     updated_target = (
