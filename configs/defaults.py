@@ -314,7 +314,7 @@ class PQNCraftaxCountsConfig(BaseConfig):
     episode_length: int = None
     num_environments: int = 1024
     num_steps: int = 1
-    total_time_steps: float = 1e9
+    total_time_steps: float = 1e6
 
     # Exploration Configs
     beta: float = 0.5
@@ -350,7 +350,7 @@ class PQNCraftaxConfig(BaseConfig):
     episode_length: int = None
     num_environments: int = 1024
     num_steps: int = 1
-    total_time_steps: float = 1e9
+    total_time_steps: float = 1e6
 
     # Exploration Configs
     beta: float = 0.0
