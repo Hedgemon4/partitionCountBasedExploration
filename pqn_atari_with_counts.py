@@ -102,8 +102,23 @@ def make_env(args):
     return env, env_params
 
 
+def compute_save_indices(num_updates, timesteps_per_update, interval):
+    """Update indices whose end-of-step timestep is closest to each interval
+    boundary. Returns a de-duplicated, in-order list of update indices."""
+    if interval is None or interval <= 0:
+        return []
+    interval = int(interval)
+    indices = []
+    for boundary in range(interval, num_updates * timesteps_per_update + 1, interval):
+        idx = min(round(boundary / timesteps_per_update) - 1, num_updates - 1)
+        if idx not in indices:
+            indices.append(idx)
+    return indices
+
+
 def make_run(args):
     num_updates = int(args.total_time_steps // args.num_environments // args.num_steps)
+    timesteps_per_update = int(args.num_steps * args.num_environments)
 
     # Environment Setup
     env, env_params = make_env(args)
@@ -192,7 +207,7 @@ def make_run(args):
         # Split network for eqx
         dynamic_params, static = eqx.partition(initial_model, eqx.is_array)
 
-        def train_step(carry, _):
+        def train_step(carry, save_slot):
             (
                 key,
                 step_number,
@@ -201,6 +216,7 @@ def make_run(args):
                 carry_params,
                 carry_opt_state,
                 train_episode_metrics,
+                counts_buffer,
             ) = carry
             epsilon = epsilon_schedule(step_number)
             model = eqx.combine(carry_params, static)
@@ -507,9 +523,18 @@ def make_run(args):
             metrics["intrinsic_return_per_game_ema"] = updated_intrinsic_per_game_ema
             metrics["length_ema"] = updated_episode_lengths_ema
 
-            # Capture count snapshots at this update step
+            # Write this update step's counts into the save buffer only if this
+            # step is a designated save point (save_slot >= 0). Avoids stacking
+            # a snapshot per update step (which would be ~num_updates × counts).
             step_model = eqx.combine(epoch_params, static)
             step_counts = step_model.counts
+
+            counts_buffer = jax.lax.cond(
+                save_slot >= 0,
+                lambda buf: buf.at[save_slot].set(step_counts),
+                lambda buf: buf,
+                counts_buffer,
+            )
 
             return (
                 epoch_key,
@@ -519,7 +544,28 @@ def make_run(args):
                 epoch_params,
                 epoch_opt_state,
                 updated_episode_metrics,
-            ), (metrics, step_counts)
+                counts_buffer,
+            ), metrics
+
+        # Decide the count-snapshot save points up front (fully determined by
+        # static config). save_slots[i] is the buffer slot to write at update i,
+        # or -1 if update i is not a save point. The buffer holds only the
+        # snapshots we intend to persist, instead of one per update step.
+        save_indices = compute_save_indices(
+            num_updates,
+            timesteps_per_update,
+            getattr(args, "count_save_timestep_interval", 0),
+        )
+        num_saves = len(save_indices)
+        save_slots = np.full(num_updates, -1, dtype=np.int32)
+        for slot, idx in enumerate(save_indices):
+            save_slots[idx] = slot
+        save_slots = jnp.asarray(save_slots)
+
+        counts_buffer = jnp.zeros(
+            (max(num_saves, 1), *initial_model.counts.shape),
+            dtype=initial_model.counts.dtype,
+        )
 
         training_carry = (
             key,
@@ -529,23 +575,22 @@ def make_run(args):
             dynamic_params,
             initial_opt_state,
             episode_metrics,
+            counts_buffer,
         )
 
-        # Single scan over all update steps. counts and obs_counts are returned
-        # at every step (shape: (num_updates, ...)) so __main__ can select
-        # whichever timesteps it wants to save — no divisibility constraint needed.
-        final_carry, (
-            metrics,
-            counts_history,
-        ) = jax.lax.scan(train_step, training_carry, None, num_updates)
+        # Single scan over all update steps. save_slots (length num_updates)
+        # drives which steps write a count snapshot into counts_buffer; only the
+        # filled buffer (num_saves snapshots) survives in the final carry.
+        final_carry, metrics = jax.lax.scan(train_step, training_carry, save_slots)
 
         final_model = eqx.combine(final_carry[4], static)
+        counts_buffer = final_carry[7]
 
-        # counts_history      : (num_updates, *counts_shape)
-        # obs_counts_history  : ObservationCounts with leaves (num_updates, ...)
+        # counts_buffer : (num_saves, *counts_shape) — only the snapshots at the
+        # configured save points, in the same order as compute_save_indices(...).
         return (
             final_model.counts,
-            counts_history,
+            counts_buffer,
             metrics,
         )
 
@@ -586,7 +631,7 @@ if __name__ == "__main__":
     compiled_run = jax.jit(make_run(args))
     (
         counts,
-        counts_history,
+        counts_buffer,
         metrics,
     ) = jax.block_until_ready(compiled_run(rng))
     print(f"Total time: {time.time() - t0}")
@@ -598,30 +643,23 @@ if __name__ == "__main__":
     counts_path = save_path / "final_counts.npy"
     np.save(counts_path, counts)
 
-    # Save count snapshots at each interval.
-    # counts_history and obs_counts_history have shape (num_seeds, num_updates, ...)
-    # after vmap. We find the update index closest to each desired timestep boundary
-    # and save that slice — no divisibility constraint required.
-    _raw_interval = getattr(args, "count_save_timestep_interval", 0)
-    if _raw_interval > 0:
-        save_interval_timesteps = int(_raw_interval)
-        boundaries = range(
-            save_interval_timesteps,
-            num_updates * timesteps_per_update + 1,
-            save_interval_timesteps,
-        )
-
-        # Create dirs for data
+    # Save the count snapshots collected at each interval boundary. counts_buffer
+    # has shape (num_saves, *counts_shape); slot i corresponds to save_indices[i],
+    # using the same arithmetic make_run used to fill the buffer.
+    save_indices = compute_save_indices(
+        num_updates,
+        timesteps_per_update,
+        getattr(args, "count_save_timestep_interval", 0),
+    )
+    if save_indices:
         counts_path = save_path / "counts"
         counts_path.mkdir(exist_ok=True)
 
-        for boundary in boundaries:
-            # Update index whose end-of-step timestep is closest to this boundary
-            idx = min(round(boundary / timesteps_per_update) - 1, num_updates - 1)
+        for slot, idx in enumerate(save_indices):
             actual_timestep = (idx + 1) * timesteps_per_update
             np.save(
                 counts_path / f"counts_timestep_{actual_timestep}.npy",
-                counts_history[:, idx],
+                counts_buffer[slot],
             )
 
     print("Finished Run")

@@ -386,7 +386,7 @@ class AtariCountsConfig:
     epsilon_decay: float = 0.1
 
     # Env timesteps between each count snapshot (0 = save only at end of training)
-    count_save_timestep_interval: float = 5e7
+    count_save_timestep_interval: float = 5e6
 
     # Network Activation Configs
     network: NetworkConfig = QNetworkCNNCountsConfig()
