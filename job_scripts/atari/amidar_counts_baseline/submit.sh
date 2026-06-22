@@ -18,7 +18,7 @@ source $SLURM_TMPDIR/env/bin/activate
 python -m pip install --no-index --upgrade pip
 python -m pip install -U -r requirements.txt --no-index -f wheels/
 python -m pip install ale/ --no-index
-cp /home/slakins/scratch/projects/partitionCountBasedExploration/roms/*.bin $SLURM_TMPDIR/env/lib/python3.12/site-packages/ale_py/roms/
+cp /home/slakins/links/scratch/projects/partitionCountBasedExploration/roms/*.bin $SLURM_TMPDIR/env/lib/python3.12/site-packages/ale_py/roms/
 
 LINE=$(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" "$CONFIG_PATH")
 
