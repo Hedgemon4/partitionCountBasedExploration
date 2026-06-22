@@ -66,7 +66,7 @@ class CNNNetworkConfig(BaseNetworkConfig):
 class QNetworkCNNCountsConfig(CNNNetworkConfig):
     type: Literal["q_network_cnn_counts"] = "q_network_cnn_counts"
     count_layer: int = 1
-    next_state_coef: float = 0.0
+    next_state_coef: float = 0.5
     blocks: list[Block] = dataclasses.field(
         default_factory=lambda: [FTABlock(hidden_size=512), Block(hidden_size=512)]
     )
