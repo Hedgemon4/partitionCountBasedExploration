@@ -13,6 +13,7 @@ from configs.networks import (
     QNetworkCNNConfig,
     QNetworkCNNFTAConfig,
     QNetworkCNNTwoFTAConfig,
+    QNetworkCNNTwoReluConfig,
 )
 
 
@@ -343,6 +344,11 @@ class AtariTwoFTAConfig(AtariConfig):
 
 
 @chex.dataclass(frozen=True)
+class AtariTwoReluConfig(AtariConfig):
+    network: NetworkConfig = QNetworkCNNTwoReluConfig()
+
+
+@chex.dataclass(frozen=True)
 class AtariCountsConfig:
     # Experiment Configs
     seed: int = 0
@@ -368,7 +374,7 @@ class AtariCountsConfig:
     environment: str = "pong"
     num_environments: int = 128
     num_steps: int = 32
-    total_time_steps: float = 5e7
+    total_time_steps: float = 1e8
     framestack: int = 4
     life_loss_info: bool = True
     force_xla: bool = False
@@ -380,7 +386,7 @@ class AtariCountsConfig:
     epsilon_decay: float = 0.1
 
     # Env timesteps between each count snapshot (0 = save only at end of training)
-    count_save_timestep_interval: float = 5e6
+    count_save_timestep_interval: float = 5e7
 
     # Network Activation Configs
     network: NetworkConfig = QNetworkCNNCountsConfig()

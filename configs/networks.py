@@ -81,6 +81,14 @@ class QNetworkCNNConfig(CNNNetworkConfig):
 
 
 @dataclasses.dataclass(frozen=True)
+class QNetworkCNNTwoReluConfig(CNNNetworkConfig):
+    type: Literal["q_network_cnn"] = "q_network_cnn"
+    blocks: list[Block] = dataclasses.field(
+        default_factory=lambda: [Block(hidden_size=512), Block(hidden_size=512)]
+    )
+
+
+@dataclasses.dataclass(frozen=True)
 class QNetworkCNNFTAConfig(CNNNetworkConfig):
     type: Literal["q_network_cnn"] = "q_network_cnn"
     blocks: list[Block] = dataclasses.field(
@@ -103,6 +111,7 @@ NetworkConfig = Union[
     QNetworkCountsWithNextStatePrediction,
     QNetworkCNNCountsConfig,
     QNetworkCNNConfig,
+    QNetworkCNNTwoReluConfig,
     QNetworkCNNFTAConfig,
     QNetworkCNNTwoFTAConfig,
     BaseNetworkConfig,

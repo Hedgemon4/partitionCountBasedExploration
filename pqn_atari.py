@@ -402,6 +402,7 @@ def make_run(args):
 
 ConfigOptions = Union[
     Annotated[configs.AtariConfig, tyro.conf.subcommand(name="pong")],
+    Annotated[configs.AtariConfig, tyro.conf.subcommand(name="double-relu")],
     Annotated[configs.AtariFTAConfig, tyro.conf.subcommand(name="fta")],
     Annotated[configs.AtariTwoFTAConfig, tyro.conf.subcommand(name="fta-two-layer")],
 ]

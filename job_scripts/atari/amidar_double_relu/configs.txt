@@ -1,0 +1,1 @@
+double-relu --environment amidar --force-xla --output-folder-name amidar_double_relu/seed_SEED
