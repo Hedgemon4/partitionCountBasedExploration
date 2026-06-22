@@ -295,7 +295,7 @@ class PQNCraftaxCountsConfig(BaseConfig):
     # Experiment Configs
     output_folder_name: str = "pqn_craftax"
     log_observations: bool = False
-    num_seeds = 1
+    num_seeds = 10
 
     # Algorithm Configs
     initial_learning_rate: float = 0.004
@@ -331,7 +331,7 @@ class PQNCraftaxConfig(BaseConfig):
     # Experiment Configs
     output_folder_name: str = "pqn_craftax"
     log_observations: bool = False
-    num_seeds = 1
+    num_seeds = 10
 
     # Algorithm Configs
     initial_learning_rate: float = 0.004
