@@ -21,15 +21,15 @@ python -m pip install --no-index --upgrade pip
 python -m pip install -U -r requirements.txt --no-index -f wheels/
 python -m pip install ale/ --no-index
 cp /home/slakins/scratch/projects/partitionCountBasedExploration/roms/*.bin \
-   $SLURM_TMPDIR/env/lib/python3.12/site-packages/ale_py/roms/
+    $SLURM_TMPDIR/env/lib/python3.12/site-packages/ale_py/roms/
 
 LINE=$(sed -n "1p" "$CONFIG_PATH")
 
 for i in 0 1; do
-    SEED=$((2 * SLURM_ARRAY_TASK_ID + i))          # task 0->{0,1}, 1->{2,3}, ... 4->{8,9}
+    SEED=$((2 * SLURM_ARRAY_TASK_ID + i)) # task 0->{0,1}, 1->{2,3}, ... 4->{8,9}
     PARAMS="${LINE/SEED/$SEED}"
     XLA_PYTHON_CLIENT_MEM_FRACTION=0.45 \
-      srun --exclusive --ntasks=1 --cpus-per-task=8 \
+        srun --exclusive --ntasks=1 --cpus-per-task=8 \
         python pqn_atari_with_counts.py $PARAMS --seed $SEED --num-env-threads 8 &
 done
 
