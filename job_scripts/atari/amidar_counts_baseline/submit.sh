@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --account=rrg-mbowling-ad
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=64
 #SBATCH --mem=32GB
 #SBATCH --time=08:59:00
 #SBATCH --gpus=h100_3g.40gb:1
