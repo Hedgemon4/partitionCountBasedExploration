@@ -323,6 +323,9 @@ class AtariConfig:
     framestack: int = 4
     life_loss_info: bool = True
     force_xla: bool = False
+    # 0 = ALE auto, which spawns min(num_envs, hardware_concurrency) threads and
+    # oversubscribes when multiple seeds share a node. Set per-seed to its core count.
+    num_env_threads: int = 0
 
     # Exploration Configs
     epsilon_start: float = 1.0
@@ -378,6 +381,9 @@ class AtariCountsConfig:
     framestack: int = 4
     life_loss_info: bool = True
     force_xla: bool = False
+    # 0 = ALE auto, which spawns min(num_envs, hardware_concurrency) threads and
+    # oversubscribes when multiple seeds share a node. Set per-seed to its core count.
+    num_env_threads: int = 0
 
     # Exploration Configs
     beta: float = 0.5

@@ -5,16 +5,14 @@ FOLDER_NAME=$(basename "$SWEEP_DIR")
 
 CONFIG_PATH="$SWEEP_DIR/configs.txt"
 
-NUM_CONFIGS=$(wc -l <"$CONFIG_PATH")
-MAX_INDEX=$((NUM_CONFIGS - 1))
-
 OUTPUT_DIR="run_outputs/$FOLDER_NAME"
+mkdir -p "$OUTPUT_DIR"
 
 echo "Launching sweep: $FOLDER_NAME"
 echo "Outputs will be in: $OUTPUT_DIR"
-echo "Number of configurations: $NUM_CONFIGS"
 
-sbatch --array=0-$MAX_INDEX \
+# 5 array tasks x 2 seeds/task = 10 seeds (submit.sh maps task k -> seeds {2k, 2k+1}).
+sbatch --array=0-4 \
     --export=ALL,CONFIG_PATH="$CONFIG_PATH" \
     --output="$OUTPUT_DIR/${FOLDER_NAME}_%A_%a.out" \
     "$SWEEP_DIR/submit.sh"
