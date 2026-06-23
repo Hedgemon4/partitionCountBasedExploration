@@ -41,6 +41,7 @@ class Transition:
     selected_q_value: chex.Array
     all_q_values: chex.Array
     next_state: chex.Array
+    next_continuous_state: chex.Array
     next_action: chex.Array
     selected_next_q_value: chex.Array
     all_next_q_values: chex.Array
@@ -243,6 +244,8 @@ def make_run(args):
                 model_outs = jax.vmap(model)(next_state)
                 next_q_values = model_outs[0]
                 next_discrete_state = model_outs[1]
+                # Continuous count-layer FTA features of next_state — auxiliary target.
+                next_continuous_state = model_outs[2]
                 key, subkey = jax.random.split(key, 2)
                 next_action, next_q = epsilon_greedy(subkey, epsilon, next_q_values)
                 scaled_reward = reward * args.reward_scale
@@ -291,6 +294,7 @@ def make_run(args):
                     selected_q_value=selected_q_value,
                     all_q_values=all_q_values,
                     next_state=next_state,
+                    next_continuous_state=next_continuous_state,
                     next_action=next_action,
                     selected_next_q_value=next_q,
                     all_next_q_values=next_q_values,

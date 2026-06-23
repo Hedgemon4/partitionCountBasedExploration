@@ -414,12 +414,21 @@ class QNetworkCNNCounts(QNetworkCounts):
 
         discrete_representation_block = blocks[network_config.count_layer - 1]
         activation = make_activation(discrete_representation_block.activation)
+        count_hidden = blocks[self.count_layer - 1].hidden_size
 
+        # The head predicts the next state's continuous FTA features. It mirrors the
+        # encoder's count block (Linear -> LayerNorm -> FTA) so the predicted features
+        # and the target features live in the same regime for the MSE.
         self.next_state_head = [
             eqx.nn.Linear(
                 in_features=blocks[-1].hidden_size,
-                out_features=blocks[self.count_layer - 1].hidden_size,
+                out_features=count_hidden,
                 key=keys[4],
+            ),
+            eqx.nn.LayerNorm(
+                count_hidden,
+                use_weight=discrete_representation_block.learnable_norm_params,
+                use_bias=discrete_representation_block.learnable_norm_params,
             ),
             activation,
         ]
@@ -451,7 +460,10 @@ class QNetworkCNNCounts(QNetworkCounts):
 
         discrete_representation = self._discrete_representation(discrete_activation)
 
-        return x, discrete_representation, predicted_next_state
+        # Return order: q-values, one-hot bins (for counts), continuous count-layer FTA
+        # features (auxiliary target for the next-state forward model), and the head's
+        # prediction of the next state's continuous features.
+        return x, discrete_representation, discrete_activation, predicted_next_state
 
     def get_discrete_representation(self, states):
         x = states / 255.0
@@ -469,17 +481,25 @@ class QNetworkCNNCounts(QNetworkCounts):
         return self._discrete_representation(jax.lax.stop_gradient(discrete_activation))
 
     def loss(self, mini_batch, targets):
-        ### This loss uses next discrete state prediction rather than next state prediction
-        q_values, discrere_representation, predicted_next_discrete_representation = (
-            jax.vmap(self)(mini_batch.state)
-        )
+        ### Auxiliary task: predict the next state's continuous count-layer FTA features
+        ### from the current state's trunk (a one-step forward model in feature space).
+        q_values, _, _, predicted_next_features = jax.vmap(self)(mini_batch.state)
         index = jnp.arange(q_values.shape[0])
         selected_q_values = q_values[index, mini_batch.action]
 
         q_loss = 0.5 * jnp.mean((selected_q_values - targets) ** 2)
 
-        next_state_loss = 0.5 * jnp.mean(
-            (predicted_next_discrete_representation - discrere_representation) ** 2
+        # Target: continuous FTA features of the next state, captured during the rollout.
+        # stop_gradient keeps it a fixed (rollout-time) target, like a lightweight target
+        # network; only the prediction side carries gradient into the encoder.
+        target = jax.lax.stop_gradient(mini_batch.next_continuous_state)
+        per_example = 0.5 * jnp.mean(
+            (predicted_next_features - target) ** 2, axis=(-1, -2)
+        )
+        # Mask transitions whose successor is a fresh episode reset, not a real next state.
+        mask = 1.0 - mini_batch.done
+        next_state_loss = jnp.sum(per_example * mask) / jnp.clip(
+            jnp.sum(mask), a_min=1.0
         )
 
         total_loss = q_loss + self.next_state_coef * next_state_loss
