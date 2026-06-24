@@ -30,7 +30,7 @@ for i in 0 1; do
     PARAMS="${LINE/SEED/$SEED}"
     XLA_PYTHON_CLIENT_MEM_FRACTION=0.45 \
         srun --exclusive --ntasks=1 --cpus-per-task=8 \
-        python pqn_atari_with_counts.py $PARAMS --seed $SEED --num-env-threads 8 &
+        python pqn_atari_with_counts.py $PARAMS --seed $SEED &
 done
 
 wait
