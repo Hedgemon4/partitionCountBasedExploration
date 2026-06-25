@@ -321,7 +321,7 @@ class AtariConfig:
     num_steps: int = 32
     total_time_steps: float = 1e8
     framestack: int = 4
-    life_loss_info: bool = True
+    life_loss_info: bool = False
     force_xla: bool = False
     # 0 = ALE auto, which spawns min(num_envs, hardware_concurrency) threads and
     # oversubscribes when multiple seeds share a node. Set per-seed to its core count.
@@ -379,7 +379,7 @@ class AtariCountsConfig:
     num_steps: int = 32
     total_time_steps: float = 1e8
     framestack: int = 4
-    life_loss_info: bool = True
+    life_loss_info: bool = False
     force_xla: bool = False
     # 0 = ALE auto, which spawns min(num_envs, hardware_concurrency) threads and
     # oversubscribes when multiple seeds share a node. Set per-seed to its core count.

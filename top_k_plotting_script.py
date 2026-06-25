@@ -56,12 +56,12 @@ _TIMESTEP_RE = re.compile(r"_timestep_(\d+)\.npy$")
 class Args:
     """Analyze and plot specific runs from a large hyperparameter sweep."""
 
-    root_dir: Path = Path("data/seaquest_frame_logging")
-    metric: str = "returned_episode_returns"
-    intrinsic_metric: str = "intrinsic_return_ema"
-    top_k: int = 2
-    smooth: int = 1
-    output_dir: Path = Path("graphs/seaquest_frame_logging/returned_episodes")
+    root_dir: Path = Path("data/amidar_counts_sweep")
+    metric: str = "extrinsic_return_per_game_ema"
+    intrinsic_metric: str = "intrinsic_return_per_game_ema"
+    top_k: int = 10
+    smooth: int = 200
+    output_dir: Path = Path("graphs/amidar_counts_sweep/smooth/")
 
     # --- SCORING PARAMETERS ---
     score_metric: str = "last_10pct"

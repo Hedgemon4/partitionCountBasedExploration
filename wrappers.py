@@ -147,10 +147,9 @@ class LogEnvStateAtari:
     episode_lengths: jax.Array
     returned_episode_returns: jax.Array
     returned_episode_lengths: jax.Array
-    life_episode_returns: jax.Array
-    life_returned_episode_returns: jax.Array
+    clipped_episode_returns: jax.Array
+    clipped_returned_episode_returns: jax.Array
     timestep: jax.Array
-    prev_episode_frame_number: jax.Array
 
 
 class ALEGymnaxWrapperXLA:
@@ -178,10 +177,9 @@ class ALEGymnaxWrapperXLA:
             episode_lengths=jnp.zeros(self.num_envs, dtype=jnp.float32),
             returned_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
             returned_episode_lengths=jnp.zeros(self.num_envs, dtype=jnp.float32),
-            life_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
-            life_returned_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            clipped_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            clipped_returned_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
             timestep=jnp.zeros(self.num_envs, dtype=jnp.float32),
-            prev_episode_frame_number=jnp.zeros(self.num_envs, dtype=jnp.int32),
         )
         return obs, env_state
 
@@ -198,45 +196,43 @@ class ALEGymnaxWrapperXLA:
 
         handle, (obs, reward, term, trunc, info) = self._step(state.handle, action)
         done = term | trunc
-        efn = info["episode_frame_number"]
-        real_done = efn < state.prev_episode_frame_number
 
+        clipped_reward = jnp.clip(reward, -1.0, 1.0)
         new_episode_return = state.episode_returns + reward
         new_episode_length = state.episode_lengths + 1
-        new_life_episode_return = state.life_episode_returns + reward
+        new_clipped_return = state.clipped_episode_returns + clipped_reward
 
         next_state = LogEnvStateAtari(
             handle=handle,
-            episode_returns=(new_episode_return) * (1 - real_done),
-            episode_lengths=(new_episode_length) * (1 - real_done),
+            episode_returns=(new_episode_return) * (1 - done),
+            episode_lengths=(new_episode_length) * (1 - done),
             returned_episode_returns=jnp.where(
-                real_done,
+                done,
                 new_episode_return,
                 state.returned_episode_returns,
             ),
             returned_episode_lengths=jnp.where(
-                real_done,
+                done,
                 new_episode_length,
                 state.returned_episode_lengths,
             ),
-            life_episode_returns=new_life_episode_return * (1 - done),
-            life_returned_episode_returns=jnp.where(
+            clipped_episode_returns=new_clipped_return * (1 - done),
+            clipped_returned_episode_returns=jnp.where(
                 done,
-                new_life_episode_return,
-                state.life_returned_episode_returns,
+                new_clipped_return,
+                state.clipped_returned_episode_returns,
             ),
             timestep=state.timestep + 1,
-            prev_episode_frame_number=efn,
         )
 
         info["returned_episode_returns"] = next_state.returned_episode_returns
         info["returned_episode_lengths"] = next_state.returned_episode_lengths
-        info["life_returned_episode_returns"] = next_state.life_returned_episode_returns
+        info["clipped_returned_episode_returns"] = (
+            next_state.clipped_returned_episode_returns
+        )
         info["timestep"] = state.timestep
-        info["returned_episode"] = real_done
+        info["returned_episode"] = done
         info["reward"] = reward
-
-        clipped_reward = jnp.clip(reward, -1.0, 1.0)
 
         return obs, next_state, clipped_reward, done, info
 
@@ -282,10 +278,9 @@ class ALEGymnaxWrapperStandard:
             episode_lengths=jnp.zeros(self.num_envs, dtype=jnp.float32),
             returned_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
             returned_episode_lengths=jnp.zeros(self.num_envs, dtype=jnp.float32),
-            life_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
-            life_returned_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            clipped_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            clipped_returned_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
             timestep=jnp.zeros(self.num_envs, dtype=jnp.float32),
-            prev_episode_frame_number=jnp.zeros(self.num_envs, dtype=jnp.int32),
         )
         return obs, env_state
 
@@ -300,53 +295,49 @@ class ALEGymnaxWrapperStandard:
             action = jnp.expand_dims(action, axis=0)
 
         # Use pure_callback to call non-JAX ale_py from inside JIT
-        obs, reward, term, trunc, efn = self._step_callback(action)
+        obs, reward, term, trunc, _ = self._step_callback(action)
         reward = jnp.atleast_1d(jnp.asarray(reward, dtype=jnp.float32))
         term = jnp.atleast_1d(jnp.asarray(term, dtype=jnp.float32))
         trunc = jnp.atleast_1d(jnp.asarray(trunc, dtype=jnp.float32))
         done = jnp.logical_or(term, trunc)
 
-        # See XLA wrapper: detect the autoreset via episode_frame_number dropping.
-        efn = jnp.atleast_1d(jnp.asarray(efn, dtype=jnp.int32))
-        real_done = efn < state.prev_episode_frame_number
-
+        clipped_reward = jnp.clip(reward, -1.0, 1.0)
         new_episode_return = state.episode_returns + reward
         new_episode_length = state.episode_lengths + 1
-        new_life_episode_return = state.life_episode_returns + reward
+        new_clipped_return = state.clipped_episode_returns + clipped_reward
 
         next_state = LogEnvStateAtari(
             handle=None,
-            episode_returns=(new_episode_return) * (1 - real_done),
-            episode_lengths=(new_episode_length) * (1 - real_done),
+            episode_returns=(new_episode_return) * (1 - done),
+            episode_lengths=(new_episode_length) * (1 - done),
             returned_episode_returns=jnp.where(
-                real_done,
+                done,
                 new_episode_return,
                 state.returned_episode_returns,
             ),
             returned_episode_lengths=jnp.where(
-                real_done,
+                done,
                 new_episode_length,
                 state.returned_episode_lengths,
             ),
-            life_episode_returns=new_life_episode_return * (1 - done),
-            life_returned_episode_returns=jnp.where(
+            clipped_episode_returns=new_clipped_return * (1 - done),
+            clipped_returned_episode_returns=jnp.where(
                 done,
-                new_life_episode_return,
-                state.life_returned_episode_returns,
+                new_clipped_return,
+                state.clipped_returned_episode_returns,
             ),
             timestep=state.timestep + 1,
-            prev_episode_frame_number=efn,
         )
 
         info = {}  # Empty info dict for standard ale_py
         info["returned_episode_returns"] = next_state.returned_episode_returns
         info["returned_episode_lengths"] = next_state.returned_episode_lengths
-        info["life_returned_episode_returns"] = next_state.life_returned_episode_returns
+        info["clipped_returned_episode_returns"] = (
+            next_state.clipped_returned_episode_returns
+        )
         info["timestep"] = state.timestep
-        info["returned_episode"] = real_done
+        info["returned_episode"] = done
         info["reward"] = reward
-
-        clipped_reward = jnp.clip(reward, -1.0, 1.0)
 
         return obs, next_state, clipped_reward, done, info
 
