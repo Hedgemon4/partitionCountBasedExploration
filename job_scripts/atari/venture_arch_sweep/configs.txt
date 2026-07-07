@@ -1,0 +1,4 @@
+pong --environment venture --force-xla --no-life-loss-info --output-folder-name venture_arch_sweep/normal/seed_SEED
+double-relu --environment venture --force-xla --no-life-loss-info --output-folder-name venture_arch_sweep/double_relu/seed_SEED
+fta --environment venture --force-xla --no-life-loss-info --output-folder-name venture_arch_sweep/fta/seed_SEED
+fta-two-layer --environment venture --force-xla --no-life-loss-info --output-folder-name venture_arch_sweep/fta_two_layer/seed_SEED

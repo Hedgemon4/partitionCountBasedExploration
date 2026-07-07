@@ -77,6 +77,7 @@ def make_env(args):
             seed=args.seed,
             stack_num=args.framestack,
             life_loss_info=args.life_loss_info,
+            num_threads=args.num_env_threads,
         ),
         None,
     )
