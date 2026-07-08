@@ -71,6 +71,7 @@ class QNetworkCNNCountsTwoBlockConfig(CNNNetworkConfig):
         default_factory=lambda: [FTABlock(hidden_size=512), Block(hidden_size=512)]
     )
 
+
 @dataclasses.dataclass(frozen=True)
 class QNetworkCNNCountsOneBlockConfig(CNNNetworkConfig):
     type: Literal["q_network_cnn_counts"] = "q_network_cnn_counts"

@@ -178,7 +178,9 @@ class ALEGymnaxWrapperXLA:
             returned_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
             returned_episode_lengths=jnp.zeros(self.num_envs, dtype=jnp.float32),
             clipped_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
-            clipped_returned_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            clipped_returned_episode_returns=jnp.zeros(
+                self.num_envs, dtype=jnp.float32
+            ),
             timestep=jnp.zeros(self.num_envs, dtype=jnp.float32),
         )
         return obs, env_state
@@ -279,7 +281,9 @@ class ALEGymnaxWrapperStandard:
             returned_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
             returned_episode_lengths=jnp.zeros(self.num_envs, dtype=jnp.float32),
             clipped_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
-            clipped_returned_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            clipped_returned_episode_returns=jnp.zeros(
+                self.num_envs, dtype=jnp.float32
+            ),
             timestep=jnp.zeros(self.num_envs, dtype=jnp.float32),
         )
         return obs, env_state

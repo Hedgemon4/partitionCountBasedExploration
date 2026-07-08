@@ -579,7 +579,7 @@ ConfigOptions = Union[
     Annotated[
         configs.AtariCountsOneBlockConfig,
         tyro.conf.subcommand(name="one-block"),
-    ]
+    ],
 ]
 
 if __name__ == "__main__":

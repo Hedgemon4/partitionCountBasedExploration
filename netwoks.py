@@ -10,7 +10,8 @@ from configs.networks import (
     QNetworkCartpole as QNetworkCartpoleConfig,
     QNetworkCounts as QNetworkCountsConfig,
     QNetworkCountsWithNextStatePrediction as QNetworkCountsWithNextStatePredictionConfig,
-    QNetworkCNNCountsTwoBlockConfig, CNNNetworkConfig,
+    QNetworkCNNCountsTwoBlockConfig,
+    CNNNetworkConfig,
 )
 
 
