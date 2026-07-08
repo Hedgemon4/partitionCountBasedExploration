@@ -10,7 +10,7 @@ from configs.networks import (
     QNetworkCartpole as QNetworkCartpoleConfig,
     QNetworkCounts as QNetworkCountsConfig,
     QNetworkCountsWithNextStatePrediction as QNetworkCountsWithNextStatePredictionConfig,
-    QNetworkCNNCountsConfig,
+    QNetworkCNNCountsTwoBlockConfig, CNNNetworkConfig,
 )
 
 
@@ -93,6 +93,7 @@ class QNetworkCounts(eqx.Module):
     counts: Array
     count_layer: int
     num_bins: int
+    network_head_input_size: int
 
     def __init__(self, input_size, num_actions, key, network_config):
         self.blocks = []
@@ -157,9 +158,15 @@ class QNetworkCounts(eqx.Module):
             )
         )
 
+        value_head_input_size = blocks[-1].hidden_size
+        if previous_bins > 1:
+            self.blocks.append([eqx.nn.Lambda(jnp.ravel)])
+            value_head_input_size *= previous_bins
+            self.network_head_input_size = value_head_input_size
+
         self.value_head = [
             eqx.nn.Linear(
-                in_features=blocks[-1].hidden_size,
+                in_features=self.network_head_input_size,
                 out_features=num_actions,
                 key=keys[-1],
             ),
@@ -416,12 +423,9 @@ class QNetworkCNNCounts(QNetworkCounts):
         activation = make_activation(discrete_representation_block.activation)
         count_hidden = blocks[self.count_layer - 1].hidden_size
 
-        # The head predicts the next state's continuous FTA features. It mirrors the
-        # encoder's count block (Linear -> LayerNorm -> FTA) so the predicted features
-        # and the target features live in the same regime for the MSE.
         self.next_state_head = [
             eqx.nn.Linear(
-                in_features=blocks[-1].hidden_size,
+                in_features=self.network_head_input_size,
                 out_features=count_hidden,
                 key=keys[4],
             ),
@@ -432,6 +436,12 @@ class QNetworkCNNCounts(QNetworkCounts):
             ),
             activation,
         ]
+
+        for block in self.blocks:
+            print(block)
+
+        print(self.value_head)
+        print(self.next_state_head)
 
     def __call__(self, x):
         # Explicitly indicate counts are not trainable
@@ -618,7 +628,7 @@ def make_network(input_size, num_actions, key, network_config):
             key=key,
             network_config=network_config,
         )
-    elif isinstance(network_config, QNetworkCNNCountsConfig):
+    elif isinstance(network_config, CNNNetworkConfig):
         return QNetworkCNNCounts(
             input_size=input_size,
             num_actions=num_actions,

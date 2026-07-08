@@ -574,7 +574,11 @@ def make_run(args):
 ConfigOptions = Union[
     Annotated[
         configs.AtariCountsConfig,
-        tyro.conf.subcommand(name="pong"),
+        tyro.conf.subcommand(name="default"),
+    ],
+    Annotated[
+        configs.AtariCountsOneBlockConfig,
+        tyro.conf.subcommand(name="one-block"),
     ]
 ]
 
