@@ -46,6 +46,13 @@ import yaml
 # ``network`` sub-mapping of config.yaml).
 DEFAULT_GROUP_KEYS: Tuple[str, ...] = ("beta", "network.next_state_coef")
 
+# Sentinel group key: group by the run folder's top-level subdirectory name
+# (relative to ``root_dir``) instead of a config value. Used by sweeps that
+# encode the varied dimension in the directory layout rather than a scalar
+# config key — e.g. ``data/venture_arch_sweep/<arch>/seed_<N>``, where the
+# architecture is only distinguishable by the ``<arch>`` directory.
+DIR_GROUP_KEY: str = "__dir__"
+
 # The intrinsic + extrinsic reward metrics. These are the only metrics we plot
 # right now, so they are also the only ones the grouper loads by default.
 DEFAULT_METRICS: Tuple[str, ...] = ("extrinsic_return_ema", "intrinsic_return_ema")
@@ -252,7 +259,10 @@ def build_grouped_runs(
                 n_skipped_filtered += 1
                 continue
 
-        group_values = tuple(flat.get(k) for k in group_keys)
+        group_values = tuple(
+            folder.relative_to(root_dir).parts[0] if k == DIR_GROUP_KEY else flat.get(k)
+            for k in group_keys
+        )
         seed = flat.get(seed_key)
         members.setdefault(group_values, []).append((seed, folder, flat, metrics_path))
 

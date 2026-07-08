@@ -51,6 +51,16 @@ SNAPSHOT_DIRS = {
 
 _TIMESTEP_RE = re.compile(r"_timestep_(\d+)\.npy$")
 
+# Pretty legend labels for the Venture architecture sweep, keyed by the
+# top-level sweep subdirectory name (data/venture_arch_sweep/<arch>/seed_<N>).
+# Unmapped directories fall back to their raw name.
+ARCH_LABELS = {
+    "normal": "ReLU (1 layer)",
+    "double_relu": "ReLU (2 layer)",
+    "fta": "FTA",
+    "fta_two_layer": "FTA + ReLU",
+}
+
 
 @dataclass
 class Args:
@@ -74,6 +84,18 @@ class Args:
     # If you want to look at shorter episode length you need to have the data from largest to smallest value
     reverse: bool = False
     plot_extra: bool = False
+
+    arch_sweep: bool = False
+    """Architecture-sweep mode for sweeps that write ONE folder per
+    (architecture, seed) combination, grouped by a top-level subdirectory —
+    e.g. data/venture_arch_sweep/<arch>/seed_<N>, where the varied dimension
+    (network architecture) is encoded by the directory name rather than any
+    scalar config key.
+
+    When set, single-seed folders are grouped by their top-level architecture
+    subdirectory, ranked by `score_metric`, and TWO plots are produced: the
+    extrinsic learning curves and a per-architecture seed-variance box plot.
+    No intrinsic plot is produced (these runs have no intrinsic reward)."""
 
     group_seeds: bool = True
     """Seed-grouping mode for sweeps that write ONE folder per
@@ -345,6 +367,100 @@ def _resolve_reward_metrics(args: Args) -> Tuple[str, Optional[str]]:
     return ext_metric, args.intrinsic_metric
 
 
+def _main_arch_sweep(args: Args):
+    """--arch-sweep mode.
+
+    Groups single-seed run folders by their top-level architecture
+    subdirectory (data/venture_arch_sweep/<arch>/seed_<N>), ranks the merged
+    multi-seed runs by `score_metric` (best reward first), and emits the
+    extrinsic reward curves plus a per-architecture seed-variance box plot.
+    No intrinsic plot — these runs have no intrinsic reward.
+    """
+    from sweep_grouping import build_grouped_runs, DIR_GROUP_KEY
+
+    # `metric` defaults to the amidar key, which does not exist in these npz
+    # files; fall back to the plain extrinsic reward unless the user overrode it.
+    ext_metric = args.metric
+    if ext_metric in (None, "extrinsic_return_per_game_ema", "length_ema"):
+        ext_metric = "extrinsic_return_ema"
+
+    groups = build_grouped_runs(
+        args.root_dir,
+        group_keys=(DIR_GROUP_KEY,),
+        metric_names=(ext_metric,),
+    )
+    if not groups:
+        print("No grouped runs found — check --root-dir.")
+        return
+
+    results = []
+    for g in groups:
+        ext = g.metrics.get(ext_metric)
+        if ext is None:
+            continue
+        arch = g.group_values[0]
+        score, final_vals = compute_score(ext, g.steps, args.score_metric)
+        results.append(
+            {
+                "name": ARCH_LABELS.get(arch, arch),
+                "steps": g.steps,
+                "values": ext,
+                "score": score,
+                "final_seed_vals": final_vals,
+            }
+        )
+
+    # Reward metric: higher is better, so rank descending (best first).
+    results.sort(key=lambda x: x["score"], reverse=True)
+    top_results = results[: args.top_k]
+    if not top_results:
+        print("No matching architectures.")
+        return
+
+    print(
+        f"\n--- Top {len(top_results)} architectures by {args.score_metric} "
+        f"on {ext_metric} ---"
+    )
+    for i, res in enumerate(top_results, start=1):
+        print(f"  Rank {i}: score={res['score']:.3f} | {res['name']}")
+
+    # The dataclass y-limit default (100, 200) is a MountainCar length-scale
+    # range; for a reward sweep let matplotlib autoscale unless overridden.
+    ext_ylim = None if args.y_lim == (100, 200) else args.y_lim
+
+    # 1. Extrinsic reward curves
+    plot_curves(
+        top_results,
+        ext_metric,
+        args.output_dir / "filtered_learning_curves.png",
+        f"Extrinsic Reward — Top {len(top_results)} architectures by {args.score_metric}",
+        args.smooth,
+        y_lim=ext_ylim,
+        show_legend=True,
+        nan_aware=True,
+    )
+    print(f"  saved {args.output_dir / 'filtered_learning_curves.png'}")
+
+    # 2. Seed-variance box plot (final-10% per-seed values, one box per arch)
+    fig_box, ax_box = plt.subplots(figsize=(12, 6))
+    data_to_plot = [res["final_seed_vals"] for res in top_results]
+    box_labels = [res["name"] for res in top_results]
+    ax_box.boxplot(
+        data_to_plot,
+        labels=box_labels,
+        patch_artist=True,
+        boxprops=dict(facecolor="lightblue", color="blue"),
+        medianprops=dict(color="red", linewidth=2),
+    )
+    ax_box.set_ylabel(f"Final {ext_metric.replace('_', ' ').title()} (Last 10%)")
+    ax_box.set_title("Variance Across Seeds")
+    plt.xticks(rotation=45, ha="right")
+    fig_box.savefig(
+        args.output_dir / "filtered_seed_variance.png", dpi=300, bbox_inches="tight"
+    )
+    print(f"  saved {args.output_dir / 'filtered_seed_variance.png'}")
+
+
 def _main_grouped(args: Args):
     """--group-seeds mode.
 
@@ -455,6 +571,13 @@ def _main_grouped(args: Args):
 
 def main(args: Args):
     args.output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Architecture-sweep mode (one folder per (arch, seed), grouped by the
+    # top-level arch subdirectory) takes its own path and produces the
+    # extrinsic reward curves plus a per-architecture seed-variance box plot.
+    if args.arch_sweep:
+        _main_arch_sweep(args)
+        return
 
     # Seed-grouping mode (one folder per (hyperparam, seed)) takes its own path
     # and only produces the extrinsic + intrinsic reward curves.
