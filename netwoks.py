@@ -156,14 +156,15 @@ class QNetworkCounts(eqx.Module):
                 num_actions,
                 blocks[self.count_layer - 1].hidden_size,
                 number_of_discrete_states,
-            )
+            ),
+            dtype=jnp.int32,
         )
 
         value_head_input_size = blocks[-1].hidden_size
         if previous_bins > 1:
             self.blocks.append([eqx.nn.Lambda(jnp.ravel)])
             value_head_input_size *= previous_bins
-            self.network_head_input_size = value_head_input_size
+        self.network_head_input_size = value_head_input_size
 
         self.value_head = [
             eqx.nn.Linear(
@@ -174,14 +175,21 @@ class QNetworkCounts(eqx.Module):
         ]
 
     def update_counts(self, discrete_states, actions):
-        updated_counts = self.counts.at[actions].add(discrete_states)
+        # Make sure counts are ints to avoid overflow
+        updated_counts = self.counts.at[actions].add(
+            discrete_states.astype(self.counts.dtype)
+        )
         return eqx.tree_at(lambda m: m.counts, self, updated_counts)
 
     def get_intrinsic_reward(self, discrete_state, action):
-        counts = self.counts * discrete_state
+        # Make sure counts are ints to avoid overflow
+        counts = self.counts * discrete_state.astype(self.counts.dtype)
         counts = jnp.sum(counts, axis=-1)
         counts = jnp.min(counts, axis=-1)
-        reward = jnp.sqrt(2 * jnp.log(jnp.sum(counts, axis=-1)) / counts[action])
+        total = jnp.sum(counts, axis=-1)
+        reward = jnp.sqrt(
+            2 * jnp.log(total.astype(jnp.float32)) / counts[action].astype(jnp.float32)
+        )
         return reward
 
     def __call__(self, x):
@@ -300,7 +308,8 @@ class QNetworkCountsWithNextStatePrediction(QNetworkCounts):
                 num_actions,
                 blocks[self.count_layer - 1].hidden_size,
                 number_of_discrete_states,
-            )
+            ),
+            dtype=jnp.int32,
         )
 
         self.value_head = [
@@ -438,11 +447,6 @@ class QNetworkCNNCounts(QNetworkCounts):
             activation,
         ]
 
-        for block in self.blocks:
-            print(block)
-
-        print(self.value_head)
-        print(self.next_state_head)
 
     def __call__(self, x):
         # Explicitly indicate counts are not trainable
