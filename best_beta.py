@@ -14,14 +14,14 @@ class Args:
     """Find and plot the best performing run for each unique beta value."""
 
     # The root directory containing all the run subfolders
-    root_dir: Path = Path("data/mountaincar_static_epsilon")
+    root_dir: Path = Path("data/venture_counts_sweep")
     # Metrics to analyze
-    metric: str = "length_ema"
-    intrinsic_metric: str = "intrinsic_return_ema"
+    metric: str = "extrinsic_return_per_game_ema"
+    intrinsic_metric: str = "intrinsic_return_per_game_ema"
     # Window size for smoothing the line plot
-    smooth: int = 1
+    smooth: int = 20
     # Output directory for graphs
-    output_dir: Path = Path("graphs/mountaincar_static_epsilon/best_beta/")
+    output_dir: Path = Path("graphs/venture_counts_sweep/less_smooth/best_beta")
 
     # --- LEGEND PARAMETERS ---
     legend_vars: Optional[List[str]] = field(
@@ -51,7 +51,7 @@ class Args:
                          higher return is better)  [default]
     """
 
-    group_seeds: bool = False
+    group_seeds: bool = True
     """Seed-grouping mode for sweeps that write ONE folder per
     (hyperparameter, seed) combination — e.g. data/freeway_sweep, where each
     metrics.npz holds 1-D arrays for a single seed.

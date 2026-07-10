@@ -66,12 +66,12 @@ ARCH_LABELS = {
 class Args:
     """Analyze and plot specific runs from a large hyperparameter sweep."""
 
-    root_dir: Path = Path("data/amidar_counts_sweep")
-    metric: str = "extrinsic_return_per_game_ema"
+    root_dir: Path = Path("data/venture_counts_sweep")
+    metric: str = "returned_episode_lengths"
     intrinsic_metric: str = "intrinsic_return_per_game_ema"
     top_k: int = 10
-    smooth: int = 200
-    output_dir: Path = Path("graphs/amidar_counts_sweep/smooth/")
+    smooth: int = 20
+    output_dir: Path = Path("graphs/venture_counts_sweep/less_smooth/episode_length")
 
     # --- SCORING PARAMETERS ---
     score_metric: str = "last_10pct"
@@ -113,6 +113,8 @@ class Args:
     values. None = all of them. Pass e.g. `--next-state-coefs 0.25 0.5 1.0` to
     drop the 0.0 (no next-state-prediction) baseline and compare only the runs
     that actually use the next-state-prediction loss."""
+
+    group_beta: Optional[Tuple[float, ...]] = None
 
     # --- LEGEND PARAMETERS ---
     legend_vars: Optional[List[str]] = field(
@@ -491,6 +493,11 @@ def _main_grouped(args: Args):
     groups = filter_by_config(groups, "network.next_state_coef", args.next_state_coefs)
     if not groups:
         print(f"No groups left after --next-state-coefs {args.next_state_coefs}.")
+        return
+
+    groups = filter_by_config(groups, "beta", args.group_beta)
+    if not groups:
+        print(f"No groups left after --beta {args.group_beta}.")
         return
 
     results = []
