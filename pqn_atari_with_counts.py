@@ -150,7 +150,7 @@ def make_run(args):
             ),
         )
 
-        initial_opt_state = optim.init(eqx.filter(initial_model, eqx.is_array))
+        initial_opt_state = optim.init(eqx.filter(initial_model, eqx.is_inexact_array))
 
         # Epsilon Decay Setup
         epsilon_schedule = optax.linear_schedule(
