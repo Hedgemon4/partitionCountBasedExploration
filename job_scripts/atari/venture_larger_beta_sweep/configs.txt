@@ -7,3 +7,6 @@ one-block --environment venture --force-xla --beta 0.5 --network.next_state_coef
 one-block --environment venture --force-xla --beta 0.25 --network.next_state_coef 0.0 --output-folder-name venture_larger_beta_sweep/beta_0.25/seed_0
 one-block --environment venture --force-xla --beta 0.25 --network.next_state_coef 0.0 --output-folder-name venture_larger_beta_sweep/beta_0.25/seed_1
 one-block --environment venture --force-xla --beta 0.25 --network.next_state_coef 0.0 --output-folder-name venture_larger_beta_sweep/beta_0.25/seed_2
+one-block --environment venture --force-xla --beta 0.1 --network.next_state_coef 0.0 --output-folder-name venture_larger_beta_sweep/beta_0.1/seed_0
+one-block --environment venture --force-xla --beta 0.1 --network.next_state_coef 0.0 --output-folder-name venture_larger_beta_sweep/beta_0.1/seed_1
+one-block --environment venture --force-xla --beta 0.1 --network.next_state_coef 0.0 --output-folder-name venture_larger_beta_sweep/beta_0.1/seed_2

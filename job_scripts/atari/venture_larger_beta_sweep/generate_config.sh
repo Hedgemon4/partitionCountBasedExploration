@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Sweep Options
-betas=(1.0 0.5 0.25)
+betas=(1.0 0.5 0.25 0.1)
 next_state_coef=0.0
 seeds=(0 1 2)
 
