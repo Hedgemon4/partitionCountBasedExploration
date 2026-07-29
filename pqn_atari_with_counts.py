@@ -122,7 +122,7 @@ def make_run(args):
     # Environment Setup
     env, env_params = make_env(args)
 
-    input_size = int(env.observation_space(env_params).shape[0])
+    input_size = env.observation_space(env_params).shape
     num_actions = int(env.action_space(env_params).n)
 
     def run(key):
