@@ -4,7 +4,7 @@
 #SBATCH --ntasks=2                 # 2 runs per job
 #SBATCH --cpus-per-task=8          # 8 cores per run
 #SBATCH --mem-per-cpu=4G           # 16 cores x 4G = 64G/job
-#SBATCH --time=02:59:00
+#SBATCH --time=08:59:00
 #SBATCH --gpus=1                   # one L40S, shared by the 2 runs
 #SBATCH --mail-user=slakins@ualberta.ca
 #SBATCH --mail-type=ALL
