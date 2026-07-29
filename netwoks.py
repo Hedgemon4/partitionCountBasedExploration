@@ -406,12 +406,12 @@ class QNetworkCNNCounts(eqx.Module):
 
         # Construct CNN
         self.blocks = []
+        # Activation config for each block position (parallel to self.blocks) so the
+        # count layer's activation can be recovered from a single count_layer index.
+        block_activation_configs = []
         cnn_block_1 = []
         cnn_block_2 = []
         cnn_block_3 = []
-
-        # Count params
-        number_of_discrete_states = 0
 
         cnn_block_1.append(
             eqx.nn.Conv2d(
@@ -434,7 +434,9 @@ class QNetworkCNNCounts(eqx.Module):
 
         cnn_block_2.append(
             eqx.nn.Conv2d(
-                in_channels=32,
+                # If block 1 used a tiling activation, merge_bins_into_channels has
+                # folded its num_bins into the channel axis, so scale in_channels.
+                in_channels=32 * num_bins,
                 out_channels=64,
                 kernel_size=(4, 4),
                 stride=(2, 2),
@@ -454,7 +456,9 @@ class QNetworkCNNCounts(eqx.Module):
 
         cnn_block_3.append(
             eqx.nn.Conv2d(
-                in_channels=64,
+                # If block 2 used a tiling activation, merge_bins_into_channels has
+                # folded its num_bins into the channel axis, so scale in_channels.
+                in_channels=64 * num_bins,
                 out_channels=64,
                 kernel_size=(3, 3),
                 stride=(1, 1),
@@ -463,16 +467,23 @@ class QNetworkCNNCounts(eqx.Module):
             ),
         )
         cnn_block_3.append(ChannelsLayerNorm(64))
-        cnn_block_3.append(jnp.ravel)
+        # Ravel before the activation so that, if this block is the count layer, its
+        # FTA output is a flat (features, num_bins) rather than a spatial map.
+        cnn_block_3.append(eqx.nn.Lambda(jnp.ravel))
         cnn_activation_3 = make_activation(network_config.cnn_activation_3)
         cnn_block_3.append(cnn_activation_3)
         previous_bins = getattr(cnn_activation_3, "num_bins", 1)
 
-        cnn_activations = [cnn_activation_1, cnn_activation_2, cnn_activation_3]
-
         self.blocks.append(cnn_block_1)
         self.blocks.append(cnn_block_2)
         self.blocks.append(cnn_block_3)
+        block_activation_configs.extend(
+            [
+                network_config.cnn_activation_1,
+                network_config.cnn_activation_2,
+                network_config.cnn_activation_3,
+            ]
+        )
 
         blocks = network_config.blocks
         input_features = network_input * previous_bins
@@ -504,30 +515,14 @@ class QNetworkCNNCounts(eqx.Module):
             )
             activation = make_activation(block.activation)
             num_bins = getattr(activation, "num_bins", 1)
-
-            if self.count_layer == i + 4:
-                # This will be the layer which outputs the discrete representation, so we need to get the bin size
-                number_of_discrete_states = num_bins
-                self.num_bins = num_bins
             layer.append(activation)
 
             self.blocks.append(layer)
+            block_activation_configs.append(block.activation)
 
             # Compute the number of input features for the next layer, which will be the hidden size times the number of bins for the current activation
             input_features = hidden_size * num_bins
             previous_bins = num_bins
-
-        if number_of_discrete_states == 0:
-            if self.count_layer > 3 or self.count_layer < 1:
-                raise ValueError("Count layer is not a valid number!")
-            discrete_activation = cnn_activations[self.count_layer - 1]
-            number_of_discrete_states = getattr(discrete_activation, "num_bins", 1)
-            if number_of_discrete_states < 2:
-                raise ValueError(
-                    "Count layer must have at least two bins to have a discrete representation"
-                )
-
-
 
         value_head_input_size = blocks[-1].hidden_size
         if previous_bins > 1:
@@ -543,39 +538,78 @@ class QNetworkCNNCounts(eqx.Module):
             ),
         ]
 
-        # Compute the size of the counts based on some sample input
-        dummy_input = jax.ShapeDtypeStruct(shape=input_size, dtype=jnp.float32)
-        jax.debug.print("Dummy input shape: {}", dummy_input)
-        resulting_shape = jax.eval_shape(self.get_discrete_representation, dummy_input)
-        jax.debug.print("Output shape: {}", resulting_shape)
+        # ---- Size the counts table and next-state head from a traced shape ----
+        # count_layer is a single 1-indexed position into self.blocks (conv blocks
+        # 1-3 followed by the MLP blocks). Trace the trunk up to that block to read
+        # the discrete representation's (*features, num_bins) shape, rather than
+        # deriving it analytically across the FTA / merge / ravel plumbing.
+        if not 1 <= self.count_layer <= len(self.blocks):
+            raise ValueError(
+                f"count_layer={self.count_layer} is out of range for "
+                f"{len(self.blocks)} blocks"
+            )
 
+        # The count layer must use a tiling activation (e.g. FTA); its num_bins is
+        # the trailing axis of the discrete representation. Guard on the activation
+        # itself, not the traced shape: a non-tiling layer has no bins axis, so the
+        # argmax in _discrete_representation would spuriously treat a feature axis as
+        # bins and slip past a shape-based check.
+        count_activation_config = block_activation_configs[self.count_layer - 1]
+        number_of_discrete_states = getattr(
+            make_activation(count_activation_config), "num_bins", 1
+        )
+        if number_of_discrete_states < 2:
+            raise ValueError(
+                f"Count layer (block {self.count_layer}) must use a tiling activation "
+                f"(num_bins >= 2) to produce a discrete representation; its activation "
+                f"has num_bins={number_of_discrete_states}"
+            )
+
+        trunk = self.blocks
+        count_layer = self.count_layer
+
+        def _trace_discrete(states):
+            x = states / 255.0
+            for i, block in enumerate(trunk):
+                for layer in block:
+                    x = layer(x)
+                if i + 1 == count_layer:
+                    # Static method: no instance state, safe on the half-built self.
+                    return self._discrete_representation(x)
+            raise ValueError("count_layer beyond number of blocks")
+
+        dummy_input = jax.ShapeDtypeStruct(shape=input_size, dtype=jnp.float32)
+        discrete_shape = eqx.filter_eval_shape(_trace_discrete, dummy_input).shape
+        feature_shape = discrete_shape[:-1]
+        assert discrete_shape[-1] == number_of_discrete_states, (
+            discrete_shape,
+            number_of_discrete_states,
+        )
+
+        self.num_bins = number_of_discrete_states
         self.counts = jnp.ones(
-            (
-                num_actions,
-                blocks[self.count_layer - 1].hidden_size,
-                number_of_discrete_states,
-            ),
+            (num_actions, *feature_shape, number_of_discrete_states),
             dtype=jnp.int32,
         )
 
-        # TODO: Maybe get rid of this
-        discrete_representation_block = blocks[network_config.count_layer - 1]
-        activation = make_activation(discrete_representation_block.activation)
-        count_hidden = blocks[self.count_layer - 1].hidden_size
+        # Next-state head predicts the count layer's continuous (*features, num_bins)
+        # features. A Linear emits a flat vector, which we reshape to *features and
+        # pass through the same tiling activation (which appends the num_bins axis).
+        feature_size = 1
+        for dim in feature_shape:
+            feature_size *= dim
+        reshape_target = tuple(feature_shape)
 
         key, subkey = jax.random.split(key, 2)
         self.next_state_head = [
             eqx.nn.Linear(
                 in_features=self.network_head_input_size,
-                out_features=count_hidden,
+                out_features=feature_size,
                 key=subkey,
             ),
-            eqx.nn.LayerNorm(
-                count_hidden,
-                use_weight=discrete_representation_block.learnable_norm_params,
-                use_bias=discrete_representation_block.learnable_norm_params,
-            ),
-            activation,
+            eqx.nn.LayerNorm(feature_size),
+            eqx.nn.Lambda(lambda z: z.reshape(reshape_target)),
+            make_activation(count_activation_config),
         ]
 
 
@@ -587,10 +621,12 @@ class QNetworkCNNCounts(eqx.Module):
         return eqx.tree_at(lambda m: m.counts, self, updated_counts)
 
     def get_intrinsic_reward(self, discrete_state, action):
-        # Make sure counts are ints to avoid overflow
+        # counts: (num_actions, *features, num_bins); discrete_state: (*features, num_bins)
         counts = self.counts * discrete_state.astype(self.counts.dtype)
+        # Sum over the bins axis to pick out the active bin's count at each feature.
         counts = jnp.sum(counts, axis=-1)
-        counts = jnp.min(counts, axis=-1)
+        # Least-visited feature location per action (min over all feature axes).
+        counts = jnp.min(counts, axis=tuple(range(1, counts.ndim)))
         total = jnp.sum(counts, axis=-1)
         reward = jnp.sqrt(
             2 * jnp.log(total.astype(jnp.float32)) / counts[action].astype(jnp.float32)
@@ -627,14 +663,16 @@ class QNetworkCNNCounts(eqx.Module):
         # prediction of the next state's continuous features.
         return x, discrete_representation, discrete_activation, predicted_next_state
 
-    def _discrete_representation(self, discrete_activation):
-        # If the left linear tile is active, then it will be negative so won't be chosen by argmax, but should be used as the one hot
-        left_linear_active = discrete_activation[:, 0] < 0.0
+    @staticmethod
+    def _discrete_representation(discrete_activation):
+        # discrete_activation is (*features, num_bins); bins are the last axis.
+        # If the left linear tile is active it is negative, so argmax won't pick it,
+        # but it should still be the selected one-hot bin.
+        left_linear_active = discrete_activation[..., 0] < 0.0
         argmax = jnp.argmax(discrete_activation, axis=-1)
         # Either the left linear tile if active, or the argmax of the rest of the tiles
         final_indices = jnp.where(left_linear_active, 0, argmax)
-        discrete_representation = one_hot(final_indices, discrete_activation.shape[-1])
-        return discrete_representation
+        return one_hot(final_indices, discrete_activation.shape[-1])
 
 
     def get_discrete_representation(self, states):
@@ -664,8 +702,10 @@ class QNetworkCNNCounts(eqx.Module):
         # stop_gradient keeps it a fixed (rollout-time) target, like a lightweight target
         # network; only the prediction side carries gradient into the encoder.
         target = jax.lax.stop_gradient(mini_batch.next_continuous_state)
+        # Per-example mean over all feature + bin axes (rank-agnostic in *features).
         per_example = 0.5 * jnp.mean(
-            (predicted_next_features - target) ** 2, axis=(-1, -2)
+            (predicted_next_features - target) ** 2,
+            axis=tuple(range(1, predicted_next_features.ndim)),
         )
         # Mask transitions whose successor is a fresh episode reset, not a real next state.
         mask = 1.0 - mini_batch.done

@@ -9,7 +9,7 @@ from configs.networks import (
     QNetwork,
     QNetworkCartpole,
     QNetworkCountsWithNextStatePrediction,
-    QNetworkCNNCountsTwoBlockConfig,
+    QNetworkCNNCountsDefaultConfig,
     QNetworkCNNConfig,
     QNetworkCNNFTAConfig,
     QNetworkCNNTwoFTAConfig,
@@ -396,7 +396,7 @@ class AtariCountsConfig:
     count_save_timestep_interval: float = 5e6
 
     # Network Activation Configs
-    network: NetworkConfig = QNetworkCNNCountsTwoBlockConfig()
+    network: NetworkConfig = QNetworkCNNCountsDefaultConfig()
 
 
 @chex.dataclass(frozen=True)

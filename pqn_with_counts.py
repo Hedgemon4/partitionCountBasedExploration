@@ -274,7 +274,7 @@ def make_run(args):
 
             transitions, infos = intermediate_values
             flat_discrete_state = transitions.discrete_state.reshape(
-                -1, *transitions.discrete_state.shape[-2:]
+                -1, *transitions.discrete_state.shape[2:]
             )
             flat_discrete_actions = transitions.action.reshape(-1)
             model = model.update_counts(flat_discrete_state, flat_discrete_actions)
