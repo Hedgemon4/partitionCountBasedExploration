@@ -67,11 +67,11 @@ class Args:
     """Analyze and plot specific runs from a large hyperparameter sweep."""
 
     root_dir: Path = Path("data/venture_counts_sweep")
-    metric: str = "returned_episode_lengths"
+    metric: str = "extrinsic_return_per_game_ema"
     intrinsic_metric: str = "intrinsic_return_per_game_ema"
     top_k: int = 10
     smooth: int = 20
-    output_dir: Path = Path("graphs/venture_counts_sweep/less_smooth/episode_length")
+    output_dir: Path = Path("graphs/venture_beta_10seed_sweep/original/zoomed_in/")
 
     # --- SCORING PARAMETERS ---
     score_metric: str = "last_10pct"
@@ -567,7 +567,7 @@ def _main_grouped(args: Args):
                 f"Intrinsic Reward — Top {len(intrinsic_res)} groups with "
                 f"{int_metric}",
                 args.smooth,
-                y_lim=int_ylim,
+                y_lim=(0, 200),
                 show_legend=True,
                 nan_aware=True,
             )
