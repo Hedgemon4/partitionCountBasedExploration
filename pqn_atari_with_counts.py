@@ -205,7 +205,7 @@ def make_run(args):
 
         def train_step(carry, save_slot):
             (
-                key,
+                train_step_key,
                 step_number,
                 env_step,
                 env_carry,
@@ -214,6 +214,7 @@ def make_run(args):
                 train_episode_metrics,
                 counts_buffer,
             ) = carry
+            key, subkey = jax.random.split(train_step_key, 2)
             epsilon = epsilon_schedule(step_number)
             model = eqx.combine(carry_params, static)
 
@@ -415,11 +416,12 @@ def make_run(args):
                 updated_params, updated_optimizer = updates
                 return (next_rng, updated_params, updated_optimizer), metrics
 
-            # Handle key split
             epoch_outs, (epoch_q_values, epoch_losses) = jax.lax.scan(
                 epoch, (subkey, network_params, carry_opt_state), None, args.num_epochs
             )
-            epoch_key, epoch_params, epoch_opt_state = epoch_outs
+            # The epoch scan's trailing key is discarded: the next update step derives
+            # its own from the carry key instead.
+            _, epoch_params, epoch_opt_state = epoch_outs
             step_number += 1
 
             metrics = {
@@ -511,7 +513,7 @@ def make_run(args):
             )
 
             return (
-                epoch_key,
+                key,
                 step_number,
                 env_step,
                 final_env_carry,
