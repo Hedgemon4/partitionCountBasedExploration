@@ -41,7 +41,11 @@ class Transition:
     selected_q_value: chex.Array
     all_q_values: chex.Array
     next_state: chex.Array
-    next_continuous_state: chex.Array
+    # None when network.next_state_coef == 0.0: the auxiliary target is unused, and
+    # dropping the leaf keeps the (num_steps, num_envs, *features, num_bins) buffer
+    # from being allocated at all. Deliberately has no default -- the fields below
+    # have none either, so adding one here is a TypeError.
+    next_continuous_state: chex.Array | None
     next_action: chex.Array
     selected_next_q_value: chex.Array
     all_next_q_values: chex.Array
@@ -124,6 +128,10 @@ def make_run(args):
 
     input_size = env.observation_space(env_params).shape
     num_actions = int(env.action_space(env_params).n)
+
+    # At coef 0.0 the auxiliary term contributes nothing, so the network builds no
+    # next-state head and the rollout stops carrying its per-transition target.
+    predict_next_state = getattr(args.network, "next_state_coef", 0.0) != 0.0
 
     def run(key):
         # Network Setup
@@ -241,7 +249,8 @@ def make_run(args):
                 next_q_values = model_outs[0]
                 next_discrete_state = model_outs[1]
                 # Continuous count-layer FTA features of next_state — auxiliary target.
-                next_continuous_state = model_outs[2]
+                # None when the auxiliary task is off, so the scan never stacks it.
+                next_continuous_state = model_outs[2] if predict_next_state else None
                 key, subkey = jax.random.split(key, 2)
                 next_action, next_q = epsilon_greedy(subkey, epsilon, next_q_values)
                 scaled_reward = reward * args.reward_scale

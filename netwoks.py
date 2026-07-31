@@ -595,23 +595,40 @@ class QNetworkCNNCounts(eqx.Module):
         # Next-state head predicts the count layer's continuous (*features, num_bins)
         # features. A Linear emits a flat vector, which we reshape to *features and
         # pass through the same tiling activation (which appends the num_bins axis).
-        feature_size = 1
-        for dim in feature_shape:
-            feature_size *= dim
-        reshape_target = tuple(feature_shape)
+        #
+        # At next_state_coef == 0.0 the auxiliary term contributes nothing --
+        # total_loss = q_loss + 0.0 * next_state_loss, so the head only ever sees
+        # zero gradients -- so skip building it. That frees its parameters and,
+        # more importantly, lets the caller stop storing the per-transition target
+        # (~2 GB at peak for a spatial count layer). `key` is not used after this
+        # block, so not splitting it leaves every other parameter untouched.
+        if self.predicts_next_state:
+            feature_size = 1
+            for dim in feature_shape:
+                feature_size *= dim
+            reshape_target = tuple(feature_shape)
 
-        key, subkey = jax.random.split(key, 2)
-        self.next_state_head = [
-            eqx.nn.Linear(
-                in_features=self.network_head_input_size,
-                out_features=feature_size,
-                key=subkey,
-            ),
-            eqx.nn.LayerNorm(feature_size),
-            eqx.nn.Lambda(lambda z: z.reshape(reshape_target)),
-            make_activation(count_activation_config),
-        ]
+            key, subkey = jax.random.split(key, 2)
+            self.next_state_head = [
+                eqx.nn.Linear(
+                    in_features=self.network_head_input_size,
+                    out_features=feature_size,
+                    key=subkey,
+                ),
+                eqx.nn.LayerNorm(feature_size),
+                eqx.nn.Lambda(lambda z: z.reshape(reshape_target)),
+                make_activation(count_activation_config),
+            ]
 
+
+    @property
+    def predicts_next_state(self) -> bool:
+        """Whether the auxiliary next-state head exists.
+
+        next_state_coef is a plain Python float, so it lands on the static side of
+        eqx.partition(model, eqx.is_array) and this is a compile-time decision.
+        """
+        return self.next_state_coef != 0.0
 
     def update_counts(self, discrete_states, actions):
         # Make sure counts are ints to avoid overflow
@@ -652,15 +669,21 @@ class QNetworkCNNCounts(eqx.Module):
         for layer in self.value_head:
             x = layer(x)
 
-        predicted_next_state = shared_output
-        for layer in self.next_state_head:
-            predicted_next_state = layer(predicted_next_state)
+        # None rather than the empty-head fall-through, which would return
+        # shared_output -- an array of the wrong shape for this contract, so a
+        # misuse would pass silently instead of failing.
+        if self.predicts_next_state:
+            predicted_next_state = shared_output
+            for layer in self.next_state_head:
+                predicted_next_state = layer(predicted_next_state)
+        else:
+            predicted_next_state = None
 
         discrete_representation = self._discrete_representation(discrete_activation)
 
         # Return order: q-values, one-hot bins (for counts), continuous count-layer FTA
         # features (auxiliary target for the next-state forward model), and the head's
-        # prediction of the next state's continuous features.
+        # prediction of the next state's continuous features (None when disabled).
         return x, discrete_representation, discrete_activation, predicted_next_state
 
     @staticmethod
@@ -698,20 +721,27 @@ class QNetworkCNNCounts(eqx.Module):
 
         q_loss = 0.5 * jnp.mean((selected_q_values - targets) ** 2)
 
-        # Target: continuous FTA features of the next state, captured during the rollout.
-        # stop_gradient keeps it a fixed (rollout-time) target, like a lightweight target
-        # network; only the prediction side carries gradient into the encoder.
-        target = jax.lax.stop_gradient(mini_batch.next_continuous_state)
-        # Per-example mean over all feature + bin axes (rank-agnostic in *features).
-        per_example = 0.5 * jnp.mean(
-            (predicted_next_features - target) ** 2,
-            axis=tuple(range(1, predicted_next_features.ndim)),
-        )
-        # Mask transitions whose successor is a fresh episode reset, not a real next state.
-        mask = 1.0 - mini_batch.done
-        next_state_loss = jnp.sum(per_example * mask) / jnp.clip(
-            jnp.sum(mask), a_min=1.0
-        )
+        if self.predicts_next_state:
+            # Target: continuous FTA features of the next state, captured during the
+            # rollout. stop_gradient keeps it a fixed (rollout-time) target, like a
+            # lightweight target network; only the prediction side carries gradient
+            # into the encoder.
+            target = jax.lax.stop_gradient(mini_batch.next_continuous_state)
+            # Per-example mean over all feature + bin axes (rank-agnostic in *features).
+            per_example = 0.5 * jnp.mean(
+                (predicted_next_features - target) ** 2,
+                axis=tuple(range(1, predicted_next_features.ndim)),
+            )
+            # Mask transitions whose successor is a fresh episode reset, not a real
+            # next state.
+            mask = 1.0 - mini_batch.done
+            next_state_loss = jnp.sum(per_example * mask) / jnp.clip(
+                jnp.sum(mask), a_min=1.0
+            )
+        else:
+            # Reported as a flat zero rather than dropped, so metrics.npz keeps its
+            # loss_next_state key and the plotting scripts still load these runs.
+            next_state_loss = jnp.zeros(())
 
         total_loss = q_loss + self.next_state_coef * next_state_loss
 
