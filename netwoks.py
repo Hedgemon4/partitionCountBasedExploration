@@ -753,6 +753,104 @@ class QNetworkCNNCounts(eqx.Module):
         return total_loss, (selected_q_values, losses)
 
 
+class QNetworkCNNSeperateValueHeads(QNetworkCNNCounts):
+    intrinsic_value_head: list
+
+    def __init__(self, input_size, num_actions, key, network_config):
+        key, subkey = jax.random.split(key, 2)
+        super().__init__(input_size=input_size, num_actions=num_actions, key=subkey, network_config=network_config)
+
+        self.intrinsic_value_head = [
+            eqx.nn.Linear(
+                in_features=self.network_head_input_size,
+                out_features=num_actions,
+                key=key,
+            ),
+        ]
+
+    def __call__(self, x):
+        # Explicitly indicate counts are not trainable
+        jax.lax.stop_gradient(self.counts)
+        # Change from (batch, channels, height, width) to (batch, height, width, channels) for eqx.nn.Conv2d
+        x = x / 255.0
+
+        for i, block in enumerate(self.blocks):
+            for layer in block:
+                x = layer(x)
+            # Depending on which layer is being used for counts, select the appropriate activation for the discrete representation
+            if i + 1 == self.count_layer:
+                discrete_activation = x
+
+        shared_output = x
+
+        extrinsic_prediction = shared_output
+        for layer in self.value_head:
+            extrinsic_prediction = layer(extrinsic_prediction)
+
+        intrinsic_prediction = shared_output
+        for layer in self.intrinsic_value_head:
+            intrinsic_prediction = layer(intrinsic_prediction)
+
+        # None rather than the empty-head fall-through, which would return
+        # shared_output -- an array of the wrong shape for this contract, so a
+        # misuse would pass silently instead of failing.
+        if self.predicts_next_state:
+            predicted_next_state = shared_output
+            for layer in self.next_state_head:
+                predicted_next_state = layer(predicted_next_state)
+        else:
+            predicted_next_state = None
+
+        discrete_representation = self._discrete_representation(discrete_activation)
+
+        # Return order: q-values, one-hot bins (for counts), continuous count-layer FTA
+        # features (auxiliary target for the next-state forward model), and the head's
+        # prediction of the next state's continuous features (None when disabled).
+        return extrinsic_prediction, intrinsic_prediction, discrete_representation, discrete_activation, predicted_next_state
+
+    def loss(self, mini_batch, targets):
+        ### Auxiliary task: predict the next state's continuous count-layer FTA features
+        ### from the current state's trunk (a one-step forward model in feature space).
+        q_values, intrinsic_q_values , _, _, predicted_next_features = jax.vmap(self)(mini_batch.state)
+
+        index = jnp.arange(q_values.shape[0])
+        selected_q_values = q_values[index, mini_batch.action]
+
+        q_loss = 0.5 * jnp.mean((selected_q_values - targets) ** 2)
+
+        if self.predicts_next_state:
+            # Target: continuous FTA features of the next state, captured during the
+            # rollout. stop_gradient keeps it a fixed (rollout-time) target, like a
+            # lightweight target network; only the prediction side carries gradient
+            # into the encoder.
+            target = jax.lax.stop_gradient(mini_batch.next_continuous_state)
+            # Per-example mean over all feature + bin axes (rank-agnostic in *features).
+            per_example = 0.5 * jnp.mean(
+                (predicted_next_features - target) ** 2,
+                axis=tuple(range(1, predicted_next_features.ndim)),
+            )
+            # Mask transitions whose successor is a fresh episode reset, not a real
+            # next state.
+            mask = 1.0 - mini_batch.done
+            next_state_loss = jnp.sum(per_example * mask) / jnp.clip(
+                jnp.sum(mask), a_min=1.0
+            )
+        else:
+            # Reported as a flat zero rather than dropped, so metrics.npz keeps its
+            # loss_next_state key and the plotting scripts still load these runs.
+            next_state_loss = jnp.zeros(())
+
+        total_loss = q_loss + self.next_state_coef * next_state_loss
+
+        losses = {
+            "total": total_loss,
+            "q": q_loss,
+            "next_state": next_state_loss,
+        }
+        return total_loss, (selected_q_values, losses)
+
+
+
 def merge_bins_into_channels(x):          # x: (C, H, W, num_bins)
     c, h, w, bins = x.shape
     x = jnp.moveaxis(x, -1, 1)            # -> (C, num_bins, H, W)
