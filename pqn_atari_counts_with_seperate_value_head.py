@@ -16,9 +16,9 @@ from jax import Array
 
 import configs.defaults as configs
 from ale_py.vector_env import AtariVectorEnv
-from exploration import epsilon_greedy
+from exploration import epsilon_greedy_with_intrinsic_q_values
 from helper_functions import update_ema
-from netwoks import make_network
+from netwoks import QNetworkCNNSeperateValueHeads
 from wrappers import (
     ALEGymnaxWrapperXLA,
     ALEGymnaxWrapperStandard,
@@ -40,11 +40,17 @@ class Transition:
     intrinsic_reward: chex.Array
     selected_q_value: chex.Array
     all_q_values: chex.Array
+    # Both heads' full action-vectors are stored at both timesteps: the bootstrap
+    # needs a single greedy action over Q_e + beta * Q_i, then each head indexed at it.
+    selected_intrinsic_q_value: chex.Array
+    all_intrinsic_q_values: chex.Array
     next_state: chex.Array
     next_continuous_state: chex.Array | None
     next_action: chex.Array
     selected_next_q_value: chex.Array
     all_next_q_values: chex.Array
+    selected_next_intrinsic_q_value: chex.Array
+    all_next_intrinsic_q_values: chex.Array
     done: chex.Array
 
 
@@ -129,10 +135,15 @@ def make_run(args):
     # next-state head and the rollout stops carrying its per-transition target.
     predict_next_state = getattr(args.network, "next_state_coef", 0.0) != 0.0
 
+    if not args.lambda_returns:
+        raise NotImplementedError(
+            "Separate value heads only implement lambda returns"
+        )
+
     def run(key):
         # Network Setup
         key, subkey = jax.random.split(key, 2)
-        initial_model = make_network(
+        initial_model = QNetworkCNNSeperateValueHeads(
             input_size=input_size,
             num_actions=num_actions,
             key=subkey,
@@ -168,12 +179,18 @@ def make_run(args):
         start_state, start_env_state = env.reset(subkey)
 
         # Get first actions
-        initial_outputs = jax.vmap(initial_model)(start_state)
-        initial_q_values = initial_outputs[0]
-        initial_discrete_state = initial_outputs[1]
+        initial_q_values, initial_intrinsic_q_values, initial_discrete_state, _, _ = (
+            jax.vmap(initial_model)(start_state)
+        )
         key, subkey = jax.random.split(key, 2)
-        initial_action, initial_selected_q = epsilon_greedy(
-            subkey, args.epsilon_start, initial_q_values
+        initial_action, initial_selected_q, initial_selected_intrinsic_q = (
+            epsilon_greedy_with_intrinsic_q_values(
+                subkey,
+                args.epsilon_start,
+                initial_q_values,
+                initial_intrinsic_q_values,
+                args.beta,
+            )
         )
 
         # Initialize structure for computing intrinsic return metrics
@@ -190,6 +207,8 @@ def make_run(args):
             initial_discrete_state,
             initial_selected_q,
             initial_q_values,
+            initial_selected_intrinsic_q,
+            initial_intrinsic_q_values,
             initial_intrinsic_returns,
         )
 
@@ -232,6 +251,8 @@ def make_run(args):
                     discrete_state,
                     selected_q_value,
                     all_q_values,
+                    selected_intrinsic_q_value,
+                    all_intrinsic_q_values,
                     intrinsic_returns,
                 ) = carry
 
@@ -241,14 +262,30 @@ def make_run(args):
                     subkey, step_env_state, action
                 )
                 # Get next actions
-                model_outs = jax.vmap(model)(next_state)
-                next_q_values = model_outs[0]
-                next_discrete_state = model_outs[1]
+                (
+                    next_q_values,
+                    next_intrinsic_q_values,
+                    next_discrete_state,
+                    next_continuous_features,
+                    _,
+                ) = jax.vmap(model)(next_state)
                 # Continuous count-layer FTA features of next_state — auxiliary target.
                 # None when the auxiliary task is off, so the scan never stacks it.
-                next_continuous_state = model_outs[2] if predict_next_state else None
+                next_continuous_state = (
+                    next_continuous_features if predict_next_state else None
+                )
                 key, subkey = jax.random.split(key, 2)
-                next_action, next_q = epsilon_greedy(subkey, epsilon, next_q_values)
+                # Behaviour is epsilon-greedy on Q_e + beta * Q_i; both heads' values
+                # at the chosen action come back for the SARSA bootstrap.
+                next_action, next_q, next_intrinsic_q = (
+                    epsilon_greedy_with_intrinsic_q_values(
+                        subkey,
+                        epsilon,
+                        next_q_values,
+                        next_intrinsic_q_values,
+                        args.beta,
+                    )
+                )
                 scaled_reward = reward * args.reward_scale
 
                 # Compute intrinsic reward
@@ -282,11 +319,15 @@ def make_run(args):
                     intrinsic_reward=intrinsic_reward,
                     selected_q_value=selected_q_value,
                     all_q_values=all_q_values,
+                    selected_intrinsic_q_value=selected_intrinsic_q_value,
+                    all_intrinsic_q_values=all_intrinsic_q_values,
                     next_state=next_state,
                     next_continuous_state=next_continuous_state,
                     next_action=next_action,
                     selected_next_q_value=next_q,
                     all_next_q_values=next_q_values,
+                    selected_next_intrinsic_q_value=next_intrinsic_q,
+                    all_next_intrinsic_q_values=next_intrinsic_q_values,
                     done=done,
                 )
 
@@ -298,6 +339,8 @@ def make_run(args):
                     next_discrete_state,
                     next_q,
                     next_q_values,
+                    next_intrinsic_q,
+                    next_intrinsic_q_values,
                     updated_intrinsic_returns,
                 ), (
                     transition,
@@ -317,64 +360,101 @@ def make_run(args):
             model = model.update_counts(flat_discrete_state, flat_discrete_actions)
 
             # Compute Targets
-            if args.lambda_returns:
+            #
+            # One target stream per head: the extrinsic head fits the environment
+            # reward, the intrinsic head fits the raw count bonus. beta scales
+            # neither -- it only picks the action both heads bootstrap from, so both
+            # evaluate the SAME policy pi* = greedy(Q_e + beta * Q_i) and
+            # Q_e + beta * Q_i stays an exact decomposition of the fused agent's Q.
+            def bootstrap_values(
+                selected_q, selected_intrinsic_q, all_q, all_intrinsic_q
+            ):
+                """Each head's value at the action pi* takes -- or, under SARSA, at
+                the action actually taken.
 
-                def lambda_targets(carry, transition):
-                    target, next_q = carry
-                    updated_target = (
-                        transition.reward + (args.beta * transition.intrinsic_reward)
-                    ) + (
-                        (1 - transition.done)
-                        * args.gamma
-                        * (args.lam * target + (1 - args.lam) * next_q)
+                This is argmax-then-index rather than a per-head jnp.max. For a single
+                head the two are identical, but two per-head maxes would pick two
+                different actions, leaving each head evaluating a different policy and
+                neither of them the one being followed.
+                """
+                if args.sarsa_returns:
+                    return selected_q, selected_intrinsic_q
+                combined = all_q + args.beta * all_intrinsic_q
+                a_star = jnp.argmax(combined, axis=-1)
+                index = jnp.arange(a_star.shape[0])
+                return all_q[index, a_star], all_intrinsic_q[index, a_star]
+
+            def lambda_targets(carry, transition):
+                target, next_q, intrinsic_target, next_intrinsic_q = carry
+                updated_target = transition.reward + (
+                    (1 - transition.done)
+                    * args.gamma
+                    * (args.lam * target + (1 - args.lam) * next_q)
+                )
+                updated_intrinsic_target = transition.intrinsic_reward + (
+                    (1 - transition.done)
+                    * args.intrinsic_gamma
+                    * (
+                        args.intrinsic_lam * intrinsic_target
+                        + (1 - args.intrinsic_lam) * next_intrinsic_q
                     )
-                    next_q = (
-                        transition.selected_q_value
-                        if args.sarsa_returns
-                        else jnp.max(transition.all_q_values, axis=-1)
-                    )
-                    return (updated_target, next_q), updated_target
+                )
+                next_q, next_intrinsic_q = bootstrap_values(
+                    transition.selected_q_value,
+                    transition.selected_intrinsic_q_value,
+                    transition.all_q_values,
+                    transition.all_intrinsic_q_values,
+                )
+                return (
+                    updated_target,
+                    next_q,
+                    updated_intrinsic_target,
+                    next_intrinsic_q,
+                ), (updated_target, updated_intrinsic_target)
 
-                # Want to compute the targets. Each target will have the final q value in it, so we can start with that
-                last_q_value = (
-                    transitions.selected_next_q_value[-1, :]
-                    if args.sarsa_returns
-                    else jnp.max(transitions.all_next_q_values[-1, :], axis=-1)
-                )
-                last_q_value = last_q_value * (
-                    1 - transitions.done[-1]
-                )  # If done, then no q value
-                initial_return = (
-                    transitions.reward[-1]
-                    + (args.beta * transitions.intrinsic_reward[-1])
-                    + args.gamma * last_q_value
-                )
-                initial_next_q = (
-                    transitions.selected_q_value[-1, :]
-                    if args.sarsa_returns
-                    else jnp.max(transitions.all_q_values[-1, :], axis=-1)
-                )
-                carry = (initial_return, initial_next_q)
-                final_target_carry, targets = jax.lax.scan(
-                    lambda_targets,
-                    carry,
-                    jax.tree_util.tree_map(lambda x: x[:-1], transitions),
-                    reverse=True,
-                )
-                update_targets = jnp.concatenate((targets, initial_return[np.newaxis]))
-            else:
+            # Want to compute the targets. Each target will have the final q value in it, so we can start with that
+            last_q_value, last_intrinsic_q_value = bootstrap_values(
+                transitions.selected_next_q_value[-1, :],
+                transitions.selected_next_intrinsic_q_value[-1, :],
+                transitions.all_next_q_values[-1, :],
+                transitions.all_next_intrinsic_q_values[-1, :],
+            )
+            # If done, then no q value
+            last_q_value = last_q_value * (1 - transitions.done[-1])
+            last_intrinsic_q_value = last_intrinsic_q_value * (1 - transitions.done[-1])
 
-                def targets(transition, gamma):
-                    return (
-                        transition.reward
-                        + (1 - transition.done)
-                        * gamma
-                        * transition.selected_next_q_value
-                    )
+            initial_return = transitions.reward[-1] + args.gamma * last_q_value
+            initial_intrinsic_return = (
+                transitions.intrinsic_reward[-1]
+                + args.intrinsic_gamma * last_intrinsic_q_value
+            )
 
-                update_targets = jax.vmap(targets, in_axes=(0, None))(
-                    transitions, args.gamma
-                )
+            initial_next_q, initial_next_intrinsic_q = bootstrap_values(
+                transitions.selected_q_value[-1, :],
+                transitions.selected_intrinsic_q_value[-1, :],
+                transitions.all_q_values[-1, :],
+                transitions.all_intrinsic_q_values[-1, :],
+            )
+            carry = (
+                initial_return,
+                initial_next_q,
+                initial_intrinsic_return,
+                initial_next_intrinsic_q,
+            )
+            final_target_carry, (targets, intrinsic_targets) = jax.lax.scan(
+                lambda_targets,
+                carry,
+                jax.tree_util.tree_map(lambda x: x[:-1], transitions),
+                reverse=True,
+            )
+            # A 2-tuple pytree: process_data's tree_map and the minibatch scan carry
+            # both leaves through untouched, and the loss unpacks the pair.
+            update_targets = (
+                jnp.concatenate((targets, initial_return[np.newaxis])),
+                jnp.concatenate(
+                    (intrinsic_targets, initial_intrinsic_return[np.newaxis])
+                ),
+            )
 
             # Split network for eqx
             network_params, _ = eqx.partition(model, eqx.is_array)
@@ -421,7 +501,7 @@ def make_run(args):
                 updated_params, updated_optimizer = updates
                 return (next_rng, updated_params, updated_optimizer), metrics
 
-            epoch_outs, (epoch_q_values, epoch_losses) = jax.lax.scan(
+            epoch_outs, (epoch_selected_q_values, epoch_losses) = jax.lax.scan(
                 epoch, (subkey, network_params, carry_opt_state), None, args.num_epochs
             )
             # The epoch scan's trailing key is discarded: the next update step derives
@@ -429,10 +509,17 @@ def make_run(args):
             _, epoch_params, epoch_opt_state = epoch_outs
             step_number += 1
 
+            # loss returns the two heads' selected q-values as a pair.
+            epoch_q_values, epoch_intrinsic_q_values = epoch_selected_q_values
+
             metrics = {
                 "env_step": env_step,
                 "update_steps": step_number,
                 "q_values": epoch_q_values.mean(),
+                "intrinsic_q_values": epoch_intrinsic_q_values.mean(),
+                # Per-step view of the bonus scale. intrinsic_return_per_game_ema
+                # below is an episode sum, so it can't show this.
+                "intrinsic_reward_mean": transitions.intrinsic_reward.mean(),
             }
 
             metrics.update({f"loss_{k}": v.mean() for k, v in epoch_losses.items()})
@@ -580,11 +667,11 @@ def make_run(args):
 
 ConfigOptions = Union[
     Annotated[
-        configs.AtariCountsConfig,
+        configs.AtariCountsSeperateHeadsConfig,
         tyro.conf.subcommand(name="default"),
     ],
     Annotated[
-        configs.AtariCountsOneBlockConfig,
+        configs.AtariCountsSeperateHeadsOneBlockConfig,
         tyro.conf.subcommand(name="one-block"),
     ],
 ]
@@ -592,7 +679,7 @@ ConfigOptions = Union[
 if __name__ == "__main__":
     args = tyro.cli(
         ConfigOptions,
-        default=configs.AtariCountsConfig(),
+        default=configs.AtariCountsSeperateHeadsConfig(),
         config=(tyro.conf.CascadeSubcommandArgs,),
     )
 

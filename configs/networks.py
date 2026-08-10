@@ -103,6 +103,29 @@ class QNetworkCNNCountsReluConfig(CNNCountsConfig):
 
 
 @dataclasses.dataclass(frozen=True)
+class QNetworkCNNSeperateHeadsConfig(CNNCountsConfig):
+    type: Literal["q_network_cnn_seperate_value_heads"] = (
+        "q_network_cnn_seperate_value_heads"
+    )
+    # Weight on the intrinsic head's TD loss. Static, like next_state_coef.
+    intrinsic_loss_coef: float = 1.0
+    blocks: list[Block] = dataclasses.field(
+        default_factory=lambda: [Block(hidden_size=512)]
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class QNetworkCNNSeperateHeadsFTAConfig(CNNCountsConfig):
+    type: Literal["q_network_cnn_seperate_value_heads"] = (
+        "q_network_cnn_seperate_value_heads"
+    )
+    intrinsic_loss_coef: float = 1.0
+    blocks: list[Block] = dataclasses.field(
+        default_factory=lambda: [FTABlock(hidden_size=512)]
+    )
+
+
+@dataclasses.dataclass(frozen=True)
 class QNetworkCNNConfig(CNNNetworkConfig):
     type: Literal["q_network_cnn"] = "q_network_cnn"
     blocks: list[Block] = dataclasses.field(
@@ -141,6 +164,8 @@ NetworkConfig = Union[
     QNetworkCountsWithNextStatePrediction,
     QNetworkCNNCountsTwoBlockConfig,
     QNetworkCNNCountsFTAConfig,
+    QNetworkCNNSeperateHeadsConfig,
+    QNetworkCNNSeperateHeadsFTAConfig,
     QNetworkCNNConfig,
     QNetworkCNNCountsDefaultConfig,
     QNetworkCNNTwoReluConfig,

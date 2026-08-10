@@ -15,6 +15,8 @@ from configs.networks import (
     QNetworkCNNTwoFTAConfig,
     QNetworkCNNTwoReluConfig,
     QNetworkCNNCountsFTAConfig,
+    QNetworkCNNSeperateHeadsConfig,
+    QNetworkCNNSeperateHeadsFTAConfig,
 )
 
 
@@ -402,3 +404,19 @@ class AtariCountsConfig:
 @chex.dataclass(frozen=True)
 class AtariCountsOneBlockConfig(AtariCountsConfig):
     network: NetworkConfig = QNetworkCNNCountsFTAConfig()
+
+
+@chex.dataclass(frozen=True)
+class AtariCountsSeperateHeadsConfig(AtariCountsConfig):
+    output_folder_name: str = "atari_seperate_heads_testing"
+    # Discount and trace for the intrinsic head. Defaulted to the extrinsic values
+    # rather than falling back to them at runtime, so the dumped config.yaml
+    # records what actually ran.
+    intrinsic_gamma: float = 0.99
+    intrinsic_lam: float = 0.65
+    network: NetworkConfig = QNetworkCNNSeperateHeadsConfig()
+
+
+@chex.dataclass(frozen=True)
+class AtariCountsSeperateHeadsOneBlockConfig(AtariCountsSeperateHeadsConfig):
+    network: NetworkConfig = QNetworkCNNSeperateHeadsFTAConfig()
