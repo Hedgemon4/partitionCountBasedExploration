@@ -16,7 +16,10 @@ from jax import Array
 
 import configs.defaults as configs
 from ale_py.vector_env import AtariVectorEnv
-from exploration import epsilon_greedy_with_intrinsic_q_values
+from exploration import (
+    epsilon_greedy_with_intrinsic_q_values,
+    intrinsic_greedy_divergence,
+)
 from helper_functions import update_ema
 from netwoks import QNetworkCNNSeperateValueHeads
 from wrappers import (
@@ -183,7 +186,9 @@ def make_run(args):
             jax.vmap(initial_model)(start_state)
         )
         key, subkey = jax.random.split(key, 2)
-        initial_action, initial_selected_q, initial_selected_intrinsic_q = (
+        # The explore mask is only logged from inside the rollout, so it is dropped
+        # for this priming action.
+        initial_action, initial_selected_q, initial_selected_intrinsic_q, _ = (
             epsilon_greedy_with_intrinsic_q_values(
                 subkey,
                 args.epsilon_start,
@@ -277,7 +282,7 @@ def make_run(args):
                 key, subkey = jax.random.split(key, 2)
                 # Behaviour is epsilon-greedy on Q_e + beta * Q_i; both heads' values
                 # at the chosen action come back for the SARSA bootstrap.
-                next_action, next_q, next_intrinsic_q = (
+                next_action, next_q, next_intrinsic_q, explored = (
                     epsilon_greedy_with_intrinsic_q_values(
                         subkey,
                         epsilon,
@@ -286,6 +291,21 @@ def make_run(args):
                         args.beta,
                     )
                 )
+
+                # How much the intrinsic head actually steers the agent, which the
+                # exploration share beta*Q_i / (Q_e + beta*Q_i) cannot say: that
+                # compares the heads' levels, while behaviour turns on their spread
+                # across actions. Divergence is the change to the greedy rule and is
+                # epsilon-free, so it stays comparable across the epsilon sweep;
+                # override is the subset that reached the executed action.
+                divergence = intrinsic_greedy_divergence(
+                    next_q_values, next_intrinsic_q_values, args.beta
+                )
+                info["intrinsic_action_divergence"] = divergence
+                info["intrinsic_action_override"] = divergence * jnp.logical_not(
+                    explored
+                )
+
                 scaled_reward = reward * args.reward_scale
 
                 # Compute intrinsic reward

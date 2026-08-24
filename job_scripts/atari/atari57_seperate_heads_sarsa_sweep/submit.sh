@@ -23,10 +23,9 @@ python -m pip install ale/ --no-index
 cp /home/slakins/scratch/projects/partitionCountBasedExploration/roms/*.bin \
     $SLURM_TMPDIR/env/lib/python3.12/site-packages/ale_py/roms/
 
-# 195 array tasks cover 780 runs (4 games x 39 beta/gamma combos x 5 seeds),
-# 4 runs per GPU. 195 < MaxArraySize=1000, so run_sweep.sh submits this as a
-# single array job and TASK_OFFSET stays 0; the offset machinery is kept so this
-# script is identical in shape to the atari57 sweep's.
+# 2352 array tasks cover 9405 runs (57 games x 11 beta/gamma_I cells x 3 epsilons
+# x 5 seeds), 4 runs per GPU. 2352 > MaxArraySize=1000, so run_sweep.sh splits this
+# into three array jobs with TASK_OFFSET 0, 1000 and 2000.
 #   effective_task = SLURM_ARRAY_TASK_ID + TASK_OFFSET
 #   task k -> config lines {4*k+1 .. 4*k+4} (1-indexed for sed).
 TASK_OFFSET=${TASK_OFFSET:-0}

@@ -3,41 +3,6 @@
 # Separate intrinsic/extrinsic value heads: how should the two heads be weighted
 # against each other (beta), and should exploration be discounted differently from
 # exploitation (gamma_E vs gamma_I)?
-#
-# 4 games x 39 (beta, gamma_E, gamma_I) combos x 5 seeds = 780 runs.
-# submit.sh packs 4 runs per GPU -> 195 array tasks, under MaxArraySize=1000, so
-# run_sweep.sh submits this as a single array job (TASK_OFFSET stays 0).
-#
-# Two arms:
-#   beta > 0 -- the full 3x3 gamma grid, intrinsic_loss_coef at its 1.0 default.
-#               4 betas x 9 pairs = 36 combos.
-#   beta = 0 -- the extrinsic-only control, which ALSO sets
-#               intrinsic_loss_coef=0.0. gamma_E is still swept over all three
-#               values; gamma_I is pinned to gamma_E. 3 combos.
-#
-# Why gamma_I is pinned only in the beta=0 arm. At the 1.0 default, beta=0 does
-# NOT neutralise the intrinsic head: its TD loss still backprops through the
-# shared trunk, so gamma_I changes the intrinsic targets -> the trunk -> Q_e ->
-# behaviour. Zeroing intrinsic_loss_coef cuts that path: 0.0 * intrinsic_q_loss
-# contributes exactly zero gradient, the intrinsic head never leaves its init, and
-# Q_e + 0.0*Q_i is exactly Q_e so the argmax and epsilon-greedy draws (and RNG
-# consumption) are independent of gamma_I. All that varies is the logged
-# loss_intrinsic_q, a diagnostic on a frozen head -- so the three gamma_I values
-# there would be the same run three times.
-#
-# Zeroing both auxiliary coefficients is also what makes beta=0 a genuine
-# extrinsic-only control rather than "extrinsic control plus an intrinsic-value
-# auxiliary task".
-#
-# count_layer is fixed at 2 (conv2), which was the best count position in
-# atari57_count_layer_sweep. count_layer is 1-indexed over
-# [conv1, conv2, conv3, *network.blocks], and the FTA layer sits *only* at the
-# count position, so every line spells out all four activations rather than
-# relying on the `default` subcommand's defaults.
-#
-# next_state_coef is fixed at 0.0 and NOT swept. At 0.0 the network skips building
-# the auxiliary next-state head entirely and the rollout stops carrying its target,
-# which is what makes 4 runs fit on one GPU at MEM_FRACTION=0.22.
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 
