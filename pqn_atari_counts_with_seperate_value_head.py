@@ -76,6 +76,7 @@ def make_env(args):
     environment_name = args.environment
 
     # Check to see if the xla interface is available
+    xla_error = None
     try:
         test_env = AtariVectorEnv(
             environment_name,
@@ -86,7 +87,13 @@ def make_env(args):
         test_env.xla()
         del test_env
         xla_available = True
-    except (AttributeError, RuntimeError):
+    except (AttributeError, RuntimeError) as error:
+        # Keep the reason. An AttributeError means ale was built without
+        # BUILD_VECTOR_XLA_LIB (no CUDA toolkit at build time); a RuntimeError out of
+        # register_ffi_target usually means the jax that built _ale_py differs from
+        # the jax importing it. Those need opposite fixes, and are indistinguishable
+        # once the exception is dropped.
+        xla_error = error
         xla_available = False
     if xla_available:
         print("Using ale xla interface")
@@ -95,7 +102,10 @@ def make_env(args):
         print("Using ale default interface")
         wrapper = ALEGymnaxWrapperStandard
     else:
-        raise ValueError("XLA interface not available, but force_xla is set to True")
+        raise ValueError(
+            "XLA interface not available, but force_xla is set to True. "
+            f"Underlying cause: {type(xla_error).__name__}: {xla_error}"
+        ) from xla_error
     env, env_params = (
         wrapper(
             env_name=environment_name,
