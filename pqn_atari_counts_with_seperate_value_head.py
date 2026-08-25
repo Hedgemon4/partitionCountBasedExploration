@@ -88,11 +88,6 @@ def make_env(args):
         del test_env
         xla_available = True
     except (AttributeError, RuntimeError) as error:
-        # Keep the reason. An AttributeError means ale was built without
-        # BUILD_VECTOR_XLA_LIB (no CUDA toolkit at build time); a RuntimeError out of
-        # register_ffi_target usually means the jax that built _ale_py differs from
-        # the jax importing it. Those need opposite fixes, and are indistinguishable
-        # once the exception is dropped.
         xla_error = error
         xla_available = False
     if xla_available:
