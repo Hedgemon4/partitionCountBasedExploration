@@ -1,12 +1,12 @@
 #!/bin/bash
 # PLACEHOLDER: values below are copied from the previous cluster. Retarget before use.
-#SBATCH --account=aip-mbowling
+#SBATCH --account=rrg-mbowling-ad
 #SBATCH --nodes=1
 #SBATCH --ntasks=4
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=4G
 #SBATCH --time=08:59:00
-#SBATCH --gpus=1
+#SBATCH --gpus=h100_2g.20gb:1
 #SBATCH --mail-user=slakins@ualberta.ca
 #SBATCH --mail-type=ALL
 
