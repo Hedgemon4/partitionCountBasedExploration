@@ -21,7 +21,7 @@ source $SLURM_TMPDIR/env/bin/activate
 python -m pip install --no-index --upgrade pip
 python -m pip install -U -r requirements.txt --no-index -f wheels/
 python -m pip install ale/ --no-index
-cp /home/slakins/scratch/projects/partitionCountBasedExploration/roms/*.bin \
+cp /home/slakins/links/scratch/projects/partitionCountBasedExploration/roms/*.bin \
     $SLURM_TMPDIR/env/lib/python3.12/site-packages/ale_py/roms/
 
 # effective_task = SLURM_ARRAY_TASK_ID + TASK_OFFSET; task k -> config lines
