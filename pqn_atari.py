@@ -50,6 +50,7 @@ def make_env(args):
     environment_name = args.environment
 
     # Check to see if the xla interface is available
+    xla_error = None
     try:
         test_env = AtariVectorEnv(
             environment_name,
@@ -60,7 +61,8 @@ def make_env(args):
         test_env.xla()
         del test_env
         xla_available = True
-    except (AttributeError, RuntimeError):
+    except (AttributeError, RuntimeError) as error:
+        xla_error = error
         xla_available = False
     if xla_available:
         print("Using ale xla interface")
@@ -69,7 +71,10 @@ def make_env(args):
         print("Using ale default interface")
         wrapper = ALEGymnaxWrapperStandard
     else:
-        raise ValueError("XLA interface not available, but force_xla is set to True")
+        raise ValueError(
+            "XLA interface not available, but force_xla is set to True. "
+            f"Underlying cause: {type(xla_error).__name__}: {xla_error}"
+        ) from xla_error
     env, env_params = (
         wrapper(
             env_name=environment_name,
@@ -118,7 +123,7 @@ def make_run(args):
             ),
         )
 
-        initial_opt_state = optim.init(eqx.filter(initial_model, eqx.is_array))
+        initial_opt_state = optim.init(eqx.filter(initial_model, eqx.is_inexact_array))
 
         # Epsilon Decay Setup
         epsilon_schedule = optax.linear_schedule(
@@ -161,7 +166,7 @@ def make_run(args):
 
         def train_step(carry, _):
             (
-                key,
+                train_step_key,
                 step_number,
                 env_step,
                 env_carry,
@@ -169,6 +174,7 @@ def make_run(args):
                 carry_opt_state,
                 train_episode_metrics,
             ) = carry
+            key, subkey = jax.random.split(train_step_key, 2)
             epsilon = epsilon_schedule(step_number)
             model = eqx.combine(carry_params, static)
 
@@ -263,12 +269,12 @@ def make_run(args):
             else:
 
                 def targets(transition, gamma):
-                    return (
-                        transition.reward
-                        + (1 - transition.done)
-                        * gamma
-                        * transition.selected_next_q_value
+                    next_q = (
+                        transition.selected_next_q_value
+                        if args.sarsa_returns
+                        else jnp.max(transition.all_next_q_values, axis=-1)
                     )
+                    return transition.reward + (1 - transition.done) * gamma * next_q
 
                 update_targets = jax.vmap(targets, in_axes=(0, None))(
                     transitions, args.gamma
@@ -319,11 +325,12 @@ def make_run(args):
                 updated_params, updated_optimizer = updates
                 return (next_rng, updated_params, updated_optimizer), metrics
 
-            # Handle key split
             epoch_outs, (epoch_q_values, epoch_losses) = jax.lax.scan(
                 epoch, (subkey, network_params, carry_opt_state), None, args.num_epochs
             )
-            epoch_key, epoch_params, epoch_opt_state = epoch_outs
+            # The epoch scan's trailing key is discarded: the next update step derives
+            # its own from the carry key instead.
+            _, epoch_params, epoch_opt_state = epoch_outs
             step_number += 1
 
             metrics = {
@@ -374,7 +381,7 @@ def make_run(args):
             metrics["length_ema"] = updated_episode_lengths_ema
 
             return (
-                epoch_key,
+                key,
                 step_number,
                 env_step,
                 final_env_carry,
