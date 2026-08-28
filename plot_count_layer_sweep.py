@@ -45,7 +45,7 @@ import dataclasses
 import math
 import re
 from pathlib import Path
-from typing import Literal, Sequence
+from typing import Callable, Literal, Sequence
 
 import matplotlib
 
@@ -60,6 +60,25 @@ from scipy import stats
 EXTRINSIC_METRIC = "extrinsic_return_per_game_ema"
 INTRINSIC_METRIC = "intrinsic_return_per_game_ema"
 STEP_KEY = "env_step"
+
+
+@dataclasses.dataclass(frozen=True)
+class Metric:
+    """One plottable series: where to read it and how to draw it."""
+
+    key: str  # the metrics.npz key
+    label: str  # y-axis label
+    log: bool = False  # losses span orders of magnitude
+
+
+# The two series every sweep in this repo has. A caller wanting more (the
+# separate-value-head runs also log per-head Q values and losses) passes its own
+# mapping to load_combos -- asking for a key that a sweep's runs predate would
+# otherwise mark every one of them unreadable.
+DEFAULT_METRICS = {
+    "extrinsic": Metric(EXTRINSIC_METRIC, "Extrinsic return (EMA)"),
+    "intrinsic": Metric(INTRINSIC_METRIC, "Intrinsic return (EMA)"),
+}
 
 # Count positions in network order (conv2 -> conv3 -> first MLP block).
 POSITION_ORDER = ("conv2", "conv3", "mlp1")
@@ -122,27 +141,82 @@ class Args:
     figsize: tuple[float, float] = (10.0, 6.0)
 
 
+@dataclasses.dataclass(frozen=True)
+class Layout:
+    """How a sweep's directory tree maps onto Combo fields.
+
+    Sweeps of different shapes (count positions vs. a two-gamma grid) live under
+    different path layouts, so the glob and its parse travel together rather than
+    being hardcoded in load_combos. `dims` names the grouping levels other than
+    game/beta/seed, in the order their columns should be reported.
+    """
+
+    glob: str
+    pattern: re.Pattern
+    dims: tuple[str, ...]
+
+
+COUNT_LAYER_LAYOUT = Layout(
+    glob="*/*/beta_*/next_*/seed_*/metrics.npz",
+    pattern=re.compile(
+        r"(?P<game>[^/]+)/(?P<position>[^/]+)/beta_(?P<beta>[^/]+)"
+        r"/next_(?P<next>[^/]+)/seed_(?P<seed>[^/]+)$"
+    ),
+    dims=("position", "next"),
+)
+
+
 @dataclasses.dataclass
 class Combo:
-    """One (position, beta, next_state_coef) cell, stacked over its seeds."""
+    """One (beta, *layout dims) cell, stacked over its seeds."""
 
     game: str
-    position: str
     beta: str
-    next_coef: str
+    params: dict[str, str]  # the layout's dims, e.g. {"position": "conv2"}
     steps: np.ndarray  # (T,)
-    extrinsic: np.ndarray  # (n_seeds, T)
-    intrinsic: np.ndarray  # (n_seeds, T)
+    series: dict[str, np.ndarray]  # metric name -> (n_seeds, T), float32
+    # aggregate() results, keyed by (metric, window, ci). Ranking, each figure the
+    # combination appears in, and the CSV columns all ask for the same curves, so
+    # without this the smoothing runs ~6x per combination.
+    _cache: dict = dataclasses.field(default_factory=dict, repr=False)
 
     @property
     def n_seeds(self) -> int:
-        return self.extrinsic.shape[0]
+        return next(iter(self.series.values())).shape[0]
+
+    # Named accessors for the count-layer layout's dims and the two universal
+    # metrics, so callers written against them keep working now that both live
+    # in dicts.
+    @property
+    def position(self) -> str:
+        return self.params.get("position", "")
+
+    @property
+    def next_coef(self) -> str:
+        return self.params.get("next", "")
+
+    @property
+    def extrinsic(self) -> np.ndarray:
+        return self.series["extrinsic"]
+
+    @property
+    def intrinsic(self) -> np.ndarray:
+        return self.series["intrinsic"]
 
     def label(self) -> str:
         return f"{self.position}  β={self.beta}  next={self.next_coef}"
 
     def curves(self, metric: str) -> np.ndarray:
-        return self.extrinsic if metric == "extrinsic" else self.intrinsic
+        return self.series[metric]
+
+    def aggregated(
+        self, metric: str, window: int, ci: str = "t"
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Memoised aggregate() for one of this combination's metrics."""
+        key = (metric, window, ci)
+        if key not in self._cache:
+            self._cache[key] = aggregate(self.curves(metric), window, ci)
+        return self._cache[key]
 
 
 def rolling_mean(values: np.ndarray, window: int) -> np.ndarray:
@@ -163,63 +237,98 @@ def rolling_mean(values: np.ndarray, window: int) -> np.ndarray:
     )
 
 
-def load_combos(root: Path) -> tuple[list[Combo], list[tuple[str, ...]]]:
+def load_combos(
+    root: Path,
+    layout: Layout = COUNT_LAYER_LAYOUT,
+    metrics: dict[str, Metric] = DEFAULT_METRICS,
+) -> tuple[list[Combo], list[dict[str, str]]]:
     """Read every run under `root`, grouped into combinations.
 
     Also returns the runs that could not be read, so a partial sweep is reported
-    rather than silently averaged over fewer seeds.
+    rather than silently averaged over fewer seeds. `layout` selects the on-disk
+    path shape and `metrics` the series to load; both default to the count-layer
+    sweeps' choices.
     """
-    pattern = re.compile(
-        r"(?P<game>[^/]+)/(?P<position>[^/]+)/beta_(?P<beta>[^/]+)"
-        r"/next_(?P<next>[^/]+)/seed_(?P<seed>[^/]+)$"
-    )
-    grouped: dict[tuple[str, str, str, str], list[tuple[str, Path]]] = {}
-    for metrics_path in sorted(root.glob("*/*/beta_*/next_*/seed_*/metrics.npz")):
-        match = pattern.search(metrics_path.parent.relative_to(root).as_posix())
+    # key is (game, beta, *dim values) -- a tuple so the grouping stays hashable
+    # and sorts in a stable order.
+    grouped: dict[tuple[str, ...], list[tuple[str, Path]]] = {}
+    for metrics_path in sorted(root.glob(layout.glob)):
+        match = layout.pattern.search(
+            metrics_path.parent.relative_to(root).as_posix()
+        )
         if match is None:
             continue
-        key = (match["game"], match["position"], match["beta"], match["next"])
+        key = (match["game"], match["beta"], *(match[d] for d in layout.dims))
         grouped.setdefault(key, []).append((match["seed"], metrics_path))
 
     combos: list[Combo] = []
-    failures: list[tuple[str, ...]] = []
+    failures: list[dict[str, str]] = []
     for key, entries in sorted(grouped.items()):
+        params = dict(zip(layout.dims, key[2:]))
         steps: list[np.ndarray] = []
-        extrinsic: list[np.ndarray] = []
-        intrinsic: list[np.ndarray] = []
+        series: dict[str, list[np.ndarray]] = {name: [] for name in metrics}
         for seed, path in sorted(entries):
             try:
                 with np.load(path) as data:
-                    steps.append(np.asarray(data[STEP_KEY], dtype=float))
-                    extrinsic.append(np.asarray(data[EXTRINSIC_METRIC], dtype=float))
-                    intrinsic.append(np.asarray(data[INTRINSIC_METRIC], dtype=float))
+                    # Read every metric before appending any, so a run missing one
+                    # key is recorded as a failure rather than left half-loaded
+                    # with its series out of step with each other.
+                    loaded = {
+                        name: np.asarray(data[metric.key], dtype=np.float32)
+                        for name, metric in metrics.items()
+                    }
+                    # Keep the on-disk float32; aggregate() upcasts for the maths.
+                    steps.append(np.asarray(data[STEP_KEY], dtype=np.float64))
+                    for name, values in loaded.items():
+                        series[name].append(values)
             except (OSError, KeyError, ValueError) as error:
-                failures.append((*key, seed, type(error).__name__))
-        if not extrinsic:
+                failures.append(
+                    {
+                        "game": key[0],
+                        "beta": key[1],
+                        **params,
+                        "seed": seed,
+                        "error": type(error).__name__,
+                    }
+                )
+        if not steps:
             continue
         # Seeds can differ in length if a run was cut short; use the common prefix.
-        length = min(arr.shape[0] for arr in extrinsic)
+        length = min(arr.shape[0] for arrs in series.values() for arr in arrs)
         combos.append(
             Combo(
                 game=key[0],
-                position=key[1],
-                beta=key[2],
-                next_coef=key[3],
+                beta=key[1],
+                params=params,
                 steps=steps[0][:length],
-                extrinsic=np.stack([a[:length] for a in extrinsic]),
-                intrinsic=np.stack([a[:length] for a in intrinsic]),
+                series={
+                    name: np.stack([a[:length] for a in arrs])
+                    for name, arrs in series.items()
+                },
             )
         )
     return combos, failures
 
 
-def aggregate(curves: np.ndarray, window: int) -> tuple[np.ndarray, np.ndarray]:
+def aggregate(
+    curves: np.ndarray, window: int, ci: str = "t"
+) -> tuple[np.ndarray, np.ndarray]:
     """Smooth each seed, then return (mean, half-width of a 95% CI).
 
     The EMA metrics are NaN until a seed's first episode ends, so everything is
-    NaN-aware. The band is a Student-t interval on the standard error, which is
-    honest about n=5 in a way a normal approximation is not.
+    NaN-aware.
+
+    `ci` picks the multiplier on the standard error. "t" is the Student-t
+    interval, which is the one that actually attains 95% coverage at these seed
+    counts (2.776 at n=5). "normal" is the familiar 1.96, i.e. the large-sample
+    limit; at n=5 it is ~30% narrower and covers about 91%, not 95%. It is
+    offered because it is the convention elsewhere, not because it is better
+    here.
+
+    Curves are held as float32 (their on-disk dtype) but the arithmetic runs in
+    float64, so halving the stored size does not move any result.
     """
+    curves = np.asarray(curves, dtype=np.float64)
     smoothed = np.stack([rolling_mean(row, window) for row in curves])
     n_valid = np.sum(np.isfinite(smoothed), axis=0)
     with np.errstate(invalid="ignore"):
@@ -231,13 +340,20 @@ def aggregate(curves: np.ndarray, window: int) -> tuple[np.ndarray, np.ndarray]:
         out=np.full(std.shape, np.nan, dtype=float),
         where=n_valid > 1,
     )
-    critical = stats.t.ppf(0.975, max(smoothed.shape[0] - 1, 1))
+    if ci == "normal":
+        critical = 1.959963984540054
+    else:
+        critical = stats.t.ppf(0.975, max(smoothed.shape[0] - 1, 1))
     return mean, sem * critical
 
 
 def score_combo(combo: Combo, score: str, final_frac: float, window: int) -> float:
-    """Rank a combination by its extrinsic curve. Higher always wins."""
-    mean, _ = aggregate(combo.extrinsic, window)
+    """Rank a combination by its extrinsic curve. Higher always wins.
+
+    The band choice cannot change a ranking -- only the mean is read here -- so
+    this always asks for the default aggregation and shares its cache entry.
+    """
+    mean, _ = combo.aggregated("extrinsic", window)
     finite = np.isfinite(mean)
     if not finite.any():
         return float("-inf")
@@ -266,21 +382,46 @@ def _style_axes(ax, theme: dict, ylabel: str) -> None:
     ax.xaxis.set_major_formatter(
         FuncFormatter(lambda v, _: "0" if v == 0 else f"{v / 1e6:,.0f}M")
     )
-    # Neither return metric can be negative; a band dipping below 0 is an
-    # artefact of the interval, not a score.
-    ax.set_ylim(bottom=0)
+
+
+def _format_endpoint(value: float) -> str:
+    """Enough significant figures to be informative at any magnitude.
+
+    Returns run to thousands and TD losses to hundredths of a unit, so the plain
+    thousands-separated integer that suits a score of 12,480 renders a loss of
+    0.044 as a bare "0".
+    """
+    magnitude = abs(value)
+    if magnitude >= 100 or value == 0:
+        return f"{value:,.0f}"
+    if magnitude >= 1:
+        return f"{value:,.1f}"
+    if magnitude >= 0.01:
+        return f"{value:.3f}"
+    return f"{value:.1e}"
 
 
 def plot_curves(
     combos: Sequence[Combo],
     *,
-    metric: Literal["extrinsic", "intrinsic"],
+    metric: str,
     title: str,
     subtitle: str,
     path: Path,
     args: Args,
+    label_fn: Callable[[Combo], str] = Combo.label,
+    metrics: dict[str, Metric] = DEFAULT_METRICS,
+    hline: tuple[float, str] | None = None,
 ) -> None:
-    """One axes, one file, one colour per series in rank order."""
+    """One axes, one file, one colour per series in rank order.
+
+    label_fn lets a caller drop hyperparameters that are constant across its sweep
+    (e.g. next_state_coef, which never varies in the Atari-57 sweep) from the legend.
+    `metrics` supplies the axis label and scale for `metric`. `hline` is an optional
+    (y, label) reference line, for metrics with a meaningful threshold.
+    """
+    spec = metrics[metric]
+    ci = getattr(args, "ci", "t")
     theme = THEMES[args.theme]
     show_band = len(combos) <= args.band_max_series
     # Ten overlapping bands saturate at the opacity that suits five, so fade them.
@@ -288,15 +429,28 @@ def plot_curves(
     fig, ax = plt.subplots(figsize=args.figsize, dpi=args.dpi)
     fig.patch.set_facecolor(theme["surface"])
 
+    if hline is not None:
+        y, hlabel = hline
+        ax.axhline(
+            y,
+            color=theme["ink_secondary"],
+            linewidth=1.0,
+            linestyle="--",
+            label=hlabel,
+            zorder=1,
+        )
+
     endpoints: list[tuple[float, float]] = []
+    lowest_mean = np.inf
     for rank, combo in enumerate(combos):
-        mean, band = aggregate(combo.curves(metric), args.smooth)
+        mean, band = combo.aggregated(metric, args.smooth, ci)
         finite = np.isfinite(mean)
         if not finite.any():
             continue
         steps = combo.steps[finite]
         colour = SERIES_COLOURS[rank % len(SERIES_COLOURS)]
         endpoints.append((float(mean[finite][-1]), float(steps[-1])))
+        lowest_mean = min(lowest_mean, float(np.min(mean[finite])))
 
         ax.plot(
             steps,
@@ -305,7 +459,7 @@ def plot_curves(
             linewidth=2.0,
             solid_capstyle="round",
             solid_joinstyle="round",
-            label=f"{combo.label()}  (n={combo.n_seeds})",
+            label=f"{label_fn(combo)}  (n={combo.n_seeds})",
             zorder=3 + (len(combos) - rank),
         )
         if show_band:
@@ -326,7 +480,7 @@ def plot_curves(
     if endpoints:
         value, x = max(endpoints)
         ax.annotate(
-            f"{value:,.0f}",
+            _format_endpoint(value),
             xy=(x, value),
             xytext=(6, 0),
             textcoords="offset points",
@@ -335,8 +489,124 @@ def plot_curves(
             va="center",
         )
 
-    label = "Extrinsic" if metric == "extrinsic" else "Intrinsic"
-    _style_axes(ax, theme, f"{label} return (EMA)")
+    _style_axes(ax, theme, spec.label)
+    if spec.log:
+        # Losses fall across orders of magnitude, so a linear axis flattens the
+        # whole tail against zero. A log axis has no floor to anchor.
+        ax.set_yscale("log")
+    elif lowest_mean >= 0:
+        # Anchor the axis at zero only when nothing plotted goes below it. Several
+        # Atari games score negative (pong, ice_hockey, tennis, double_dunk, skiing),
+        # so a blanket floor of 0 would hide most of their curve. Where the metric
+        # genuinely cannot go negative -- every intrinsic curve, and the many games
+        # with non-negative scores -- the floor stays, and a CI band dipping below it
+        # is clipped as the interval artefact it is.
+        ax.set_ylim(bottom=0)
+    ax.set_title(title, color=theme["ink"], fontsize=13, loc="left", pad=18)
+    ax.text(
+        0.0,
+        1.02,
+        subtitle,
+        transform=ax.transAxes,
+        color=theme["muted"],
+        fontsize=9,
+        va="bottom",
+    )
+    ax.legend(
+        loc="upper left",
+        bbox_to_anchor=(1.02, 1.0),
+        fontsize=8,
+        frameon=False,
+        labelcolor=theme["ink_secondary"],
+        handlelength=2.2,
+    )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=args.dpi, bbox_inches="tight", facecolor=theme["surface"])
+    plt.close(fig)
+
+
+def plot_combo_metrics(
+    combo: Combo,
+    *,
+    series: Sequence[tuple[str, float, str]],
+    title: str,
+    subtitle: str,
+    ylabel: str,
+    path: Path,
+    args: Args,
+    metrics: dict[str, Metric] = DEFAULT_METRICS,
+    log: bool = False,
+) -> None:
+    """Several of one combination's metrics on one axes.
+
+    The transpose of plot_curves: that draws one metric across many combinations,
+    this draws many metrics of a single combination. Comparing the two value
+    heads (or the two TD losses) of a *single* configuration is the readable
+    view, because their magnitudes shift with beta -- overlaying five betas puts
+    quantities of different scale on one axis.
+
+    `series` is (metric name, scale, legend label). `scale` multiplies both the
+    mean and its band, so a caller can draw e.g. beta * Q_i -- the quantity that
+    actually competes with Q_e in the argmax -- beside the raw curves without
+    that being a separately stored metric.
+    """
+    ci = getattr(args, "ci", "t")
+    theme = THEMES[args.theme]
+    fig, ax = plt.subplots(figsize=args.figsize, dpi=args.dpi)
+    fig.patch.set_facecolor(theme["surface"])
+
+    endpoints: list[tuple[float, float]] = []
+    lowest_mean = np.inf
+    for rank, (metric, scale, label) in enumerate(series):
+        mean, band = combo.aggregated(metric, args.smooth, ci)
+        mean, band = mean * scale, band * scale
+        finite = np.isfinite(mean)
+        if not finite.any():
+            continue
+        steps = combo.steps[finite]
+        colour = SERIES_COLOURS[rank % len(SERIES_COLOURS)]
+        endpoints.append((float(mean[finite][-1]), float(steps[-1])))
+        lowest_mean = min(lowest_mean, float(np.min(mean[finite])))
+
+        ax.plot(
+            steps,
+            mean[finite],
+            color=colour,
+            linewidth=2.0,
+            solid_capstyle="round",
+            solid_joinstyle="round",
+            label=label,
+            zorder=3 + (len(series) - rank),
+        )
+        ax.fill_between(
+            steps,
+            (mean - band)[finite],
+            (mean + band)[finite],
+            color=colour,
+            alpha=0.12,
+            linewidth=0,
+            zorder=2,
+        )
+
+    # Unlike plot_curves, every series here is annotated: there are only two or
+    # three, and the whole point of the figure is the gap between their levels.
+    for value, x in endpoints:
+        ax.annotate(
+            _format_endpoint(value),
+            xy=(x, value),
+            xytext=(6, 0),
+            textcoords="offset points",
+            color=theme["ink_secondary"],
+            fontsize=9,
+            va="center",
+        )
+
+    _style_axes(ax, theme, ylabel)
+    if log:
+        ax.set_yscale("log")
+    elif lowest_mean >= 0:
+        ax.set_ylim(bottom=0)
     ax.set_title(title, color=theme["ink"], fontsize=13, loc="left", pad=18)
     ax.text(
         0.0,
@@ -393,17 +663,15 @@ def main(args: Args) -> None:
     if failures:
         failure_path = args.output_dir / "failed_runs.csv"
         failure_path.parent.mkdir(parents=True, exist_ok=True)
+        fields = ("game", "position", "beta", "next", "seed", "error")
         with open(failure_path, "w", newline="") as handle:
-            csv.writer(handle).writerows(
-                [
-                    ("game", "position", "beta", "next_state_coef", "seed", "error"),
-                    *failures,
-                ]
-            )
+            writer = csv.DictWriter(handle, fieldnames=list(fields))
+            writer.writeheader()
+            writer.writerows(failures)
         print(f"  {len(failures)} unreadable runs -> {failure_path}")
 
-    def tail_mean(curves: np.ndarray) -> float:
-        mean, _ = aggregate(curves, args.smooth)
+    def tail_mean(combo: Combo, metric: str) -> float:
+        mean, _ = combo.aggregated(metric, args.smooth)
         tail = math.ceil(mean.shape[0] * args.final_frac)
         return float(np.nanmean(mean[-tail:]))
 
@@ -484,8 +752,8 @@ def main(args: Args) -> None:
                         "score": round(
                             score_combo(c, score, args.final_frac, args.smooth), 3
                         ),
-                        "final_extrinsic": round(tail_mean(c.extrinsic), 3),
-                        "final_intrinsic": round(tail_mean(c.intrinsic), 3),
+                        "final_extrinsic": round(tail_mean(c, "extrinsic"), 3),
+                        "final_intrinsic": round(tail_mean(c, "intrinsic"), 3),
                     }
                     for i, c in enumerate(ranked)
                 ],
