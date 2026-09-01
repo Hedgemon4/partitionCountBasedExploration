@@ -14,11 +14,20 @@
 #   SARSA:      data/atari57_seperate_heads_sarsa_sweep_partial/<game>/beta_0.0/*/epsilon_0.001/
 #               (partial: 23 games, alien -> frostbite)
 #
-# 57 games x 2 rules x 5 seeds = 570 runs, 143 array tasks at 4 runs/task (one array job).
+# 57 games x 2 rules x 5 seeds = 570 runs, 285 array tasks at 2 runs/task (one array job).
 #
-# Do not submit before the atari4_baseline_probe result: --time is the one value to set from
-# the probe's measured elapsed rather than assumed. 02:59 lost 19.7% of atari57_beta_sweep on
-# the counts network, concentrated in slow games.
+# Walltime is now measured rather than assumed. atari4_baseline_probe ran its 12 runs at
+# 2 runs/GPU x 8 env threads and fit inside 02:59, losing one solaris seed; 4 runs x 4
+# threads was never timed on pqn_atari.py, so submit.sh follows the probe's layout exactly.
+#
+# Expect that solaris loss to recur. The probe's games were picked as worst-case stressors --
+# solaris finished 0/40 at 02:59 in atari57_beta_sweep and was the only game to lose runs
+# even at 08:59 -- so the loss here is systematic, not random: it lands on the same slow
+# games every submission, leaving them at 3-4 seeds while the rest have 5. That is the
+# accepted price of staying inside the sub-3h queue window. It is reported rather than
+# silent: plot_atari57_sarsa_summary.py lists every short cell as a `short_seeds` row in
+# coverage.csv, and a top-up sweep can follow the
+# job_scripts/classic_control/mountaincar_count_first_layer_failed_runs pattern.
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/../../.." &>/dev/null && pwd) # job_scripts/atari/<sweep> -> root

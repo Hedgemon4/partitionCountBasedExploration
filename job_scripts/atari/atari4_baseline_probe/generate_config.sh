@@ -3,7 +3,7 @@
 # Pure PQN baseline (pqn_atari.py, all-relu conv trunk), Q-learning only, on 4 games.
 #
 # This is the walltime probe for the full atari57_baseline sweep, not a result in its own
-# right. It exists because pqn_atari.py has no runtime precedent at 4 runs/GPU: the
+# right. It exists because pqn_atari.py has no runtime precedent at any GPU packing: the
 # 08:59 / 4-per-GPU setting that ran atari57_count_layer_sweep losslessly was measured on
 # the counts network, which is ~4x heavier per update (it carries a
 # (num_steps, num_envs, 64, 9, 9, num_bins) discrete_state buffer plus a permuted copy per
@@ -21,7 +21,12 @@
 # computation, which is negligible against a rollout and 2 epochs of updates, so the elapsed
 # time measured here transfers to the SARSA arm of the full sweep.
 #
-# 4 games x 1 rule x 3 seeds = 12 runs, 3 array tasks at 4 runs/task.
+# 4 games x 1 rule x 3 seeds = 12 runs, 6 array tasks at 2 runs/task.
+#
+# Result: at 2 runs/GPU x 8 env threads the 12 runs fit inside 02:59, losing one solaris
+# seed. The original 4 x 4 layout did not fit that window, so 2 x 8 is the only packing with
+# a completed timing. atari57_baseline mirrors it -- see its generate_config.sh for the
+# systematic slow-game losses that implies.
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 
