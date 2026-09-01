@@ -19,7 +19,7 @@ OUTPUT_DIR="run_outputs/$FOLDER_NAME"
 # Derive everything from configs.txt and chunk to MaxArraySize, rather than
 # hardcoding array bounds: submit.sh runs RUNS_PER_TASK lines per task, so a
 # stale hardcoded bound silently drops or duplicates runs.
-RUNS_PER_TASK=4
+RUNS_PER_TASK=2
 MAX_ARRAY_SIZE=1000
 
 NUM_CONFIGS=$(wc -l <"$CONFIG_PATH")

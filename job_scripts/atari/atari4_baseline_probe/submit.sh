@@ -29,12 +29,12 @@ cp /home/slakins/scratch/projects/partitionCountBasedExploration/roms/*.bin \
 # {4*k+1 .. 4*k+4} (1-indexed for sed). Keep in step with RUNS_PER_TASK in run_sweep.sh.
 TASK_OFFSET=${TASK_OFFSET:-0}
 EFFECTIVE_TASK=$((SLURM_ARRAY_TASK_ID + TASK_OFFSET))
-for i in 0 1 2 3; do
-    LINE_NO=$((4 * EFFECTIVE_TASK + i + 1))
+for i in 0 1; do
+    LINE_NO=$((2 * EFFECTIVE_TASK + i + 1))
     LINE=$(sed -n "${LINE_NO}p" "$CONFIG_PATH")
     [ -z "$LINE" ] && continue
     XLA_PYTHON_CLIENT_MEM_FRACTION=0.22 \
-        python pqn_atari.py $LINE --num-env-threads 4 &
+        python pqn_atari.py $LINE --num-env-threads 8 &
 done
 
 wait
