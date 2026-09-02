@@ -44,13 +44,25 @@ for each best-per-beta configuration:
     <score>/<game>/beta_<b>_values.png          Q_e, Q_i and beta*Q_i together
     <score>/<game>/beta_<b>_losses.png          both TD losses together
     <score>/<game>/beta_<b>_exploration.png     divergence and override together
-    <score>/<game>/exploration_fraction.png     all betas, scale-free ratio
+
+There is deliberately no exploration-share figure (beta*Q_i / (Q_e + beta*Q_i)). That is a
+ratio of *levels*, and is only a meaningful share when Q_e > 0 -- but Q_e goes negative on
+real games here (fishing_derby reaches -5.4, double_dunk hovers near 0), where the "share"
+inverts or exceeds 1. `divergence` answers the same question by comparing argmaxes rather
+than levels, and is well-defined on every game.
 
 The per-beta figures hold beta fixed and overlay related series, which is the readable
 view for the Q values and losses: their magnitudes move with beta, so putting six
 betas on one such axis compares quantities of different scale. divergence and override
 are exempt from that problem -- both are probabilities -- but they share a figure
 because the gap between them *is* epsilon, and that is the thing worth seeing.
+
+Scores are not comparable with the other sweeps' scripts
+-------------------------------------------------------
+This script scores on the final 2% of a 200-update rolling mean;
+plot_atari4_seperate_heads_gamma_sweep.py and plot_atari57_count_layer_sweep.py use the
+final 10% of a 750-update one. `--smooth 750 --final-frac 0.1` restores the old behaviour
+if a like-for-like comparison with those sweeps is needed.
 
 Caveats, all of which matter more here than in the 4-game sweep
 --------------------------------------------------------------
@@ -133,46 +145,6 @@ RANKED_METRICS = (
     "override",
 )
 
-# Derived, not loaded: the share of the decision variable Q_e + beta*Q_i that comes
-# from exploration. Kept out of METRICS because that dict drives both the npz load set
-# and the ranked family; this one is computed from two already-loaded series and wants
-# exactly one figure.
-EXPLORATION_FRACTION = "exploration_fraction"
-FRACTION_METRICS = {
-    **METRICS,
-    EXPLORATION_FRACTION: Metric(
-        EXPLORATION_FRACTION, "β·$Q_i$ / ($Q_e$ + β·$Q_i$)"
-    ),
-}
-
-
-def add_exploration_fraction(combo: Combo) -> None:
-    """Insert the per-seed exploration fraction into `combo.series`.
-
-    Computed per seed and *then* aggregated, because a ratio of seed means is not the
-    mean of per-seed ratios and only the latter carries an honest CI. This is why it is
-    a stored series rather than a scaled copy of an aggregated curve (the way the
-    beta*Q_i line in the per-beta value figures is drawn).
-
-    Q_e starts near zero at initialisation, so the denominator can be ~0 early; those
-    samples become NaN rather than +-inf, which the NaN-aware smoothing and aggregation
-    then drop instead of letting them set the y-range.
-
-    Mirrors the function of the same name in plot_atari4_seperate_heads_gamma_sweep.py.
-    Duplicated rather than imported so the two sweep scripts stay independent of each
-    other and depend only on the shared module.
-    """
-    beta = float(combo.beta)
-    numerator = beta * combo.series["intrinsic_q"].astype(np.float64)
-    denominator = combo.series["q"].astype(np.float64) + numerator
-    combo.series[EXPLORATION_FRACTION] = np.divide(
-        numerator,
-        denominator,
-        out=np.full(numerator.shape, np.nan),
-        where=np.abs(denominator) > 1e-6,
-    ).astype(np.float32)
-
-
 SARSA_LAYOUT = Layout(
     glob="*/beta_*/intrinsic_gamma_*/epsilon_*/seed_*/metrics.npz",
     # No shared-prefix hazard here, unlike the two-gamma sweep: gamma_E is pinned and
@@ -207,10 +179,29 @@ class Args:
     repeats hues."""
     min_seeds: int = 5
     """Combinations with fewer finished seeds are excluded and reported instead."""
-    final_frac: float = 0.1
-    """Fraction of the run averaged for the "final" score."""
-    smooth: int = 750
-    """Rolling-mean window in updates. 1 disables smoothing."""
+    final_frac: float = 0.02
+    """Fraction of the run averaged for the "final" score.
+
+    2%, not the 10% the other sweeps' scripts use. Most runs are still improving at 100M,
+    so a 10% tail under-reports final performance by ~1% (median over 726 cells). The raw
+    endpoint was rejected instead of a narrower window: it moves the best beta on 7 of 23
+    games, against 4 at 2%.
+
+    Note the interaction with --smooth: the tail is ceil(num_updates * final_frac) = 489
+    updates at 2%, so a smoothing window wider than that would decide the score instead of
+    this setting. That is why --smooth dropped to 200 alongside."""
+    smooth: int = 200
+    """Rolling-mean window in updates. 1 disables smoothing.
+
+    200, not the 750 the other sweeps' scripts use. 750 was doing nearly all the smoothing
+    and far more than intended: the in-training EMA is over *episodes* (ema_alpha = 2/31,
+    span 30) while this is over *updates*, and 2-8.5 episodes finish per update -- so 750
+    updates spans 1,500-6,400 episodes, 50-200x the EMA. At w=200, 93-99% of the
+    point-to-point variation is already gone (freeway 0.070 of raw, alien 0.013); 750 gets
+    to 97-99.8% for a 3.75x wider window.
+
+    Long-episode games get rougher curves under this: double_dunk finishes 0.42 episodes
+    per update, so its raw series is the noisiest relative to any window."""
     band_max_series: int = 10
     """Cap above which CI bands are dropped."""
     ci: Literal["normal", "t"] = "normal"
@@ -285,9 +276,6 @@ def main(args: Args) -> None:
     if args.epsilon:
         filter_note += f" · ε∈{{{','.join(args.epsilon)}}}"
 
-    for combo in combos:
-        add_exploration_fraction(combo)
-
     complete = [c for c in combos if c.n_seeds >= args.min_seeds]
     incomplete = [c for c in combos if c.n_seeds < args.min_seeds]
     games = sorted({c.game for c in complete})
@@ -338,7 +326,7 @@ def main(args: Args) -> None:
     # Say up front how much is about to be written: full per-game trees over 57 games
     # run to thousands of files, and --scores / --games are the levers.
     n_betas = len({c.beta for c in complete})
-    per_game = 2 * len(RANKED_METRICS) + 3 * n_betas + 1
+    per_game = 2 * len(RANKED_METRICS) + 3 * n_betas
     print(
         f"  writing up to {per_game} figures per game x {len(games)} games "
         f"x {len(args.scores)} score(s) = ~{per_game * len(games) * len(args.scores)} "
@@ -419,24 +407,6 @@ def main(args: Args) -> None:
                     label_fn=series_label,
                     metrics=METRICS,
                 )
-
-            # The exploration fraction is scale-free, so unlike the raw Q and loss
-            # curves it can put every beta on one axis -- the direct read of which beta
-            # ever crosses into exploiting and when.
-            plot_curves(
-                best_per_beta,
-                metric=EXPLORATION_FRACTION,
-                title=f"{game} — exploration share of the decision variable",
-                subtitle=(
-                    f"{band} · 1 = all exploration, 0 = all exploitation · "
-                    "β=0 is 0 by construction"
-                ),
-                path=out / game / "exploration_fraction.png",
-                args=args,
-                label_fn=series_label,
-                metrics=FRACTION_METRICS,
-                hline=(0.5, "heads balanced"),
-            )
 
             # Per-beta comparisons. The figures above hold a metric fixed and vary
             # beta; these hold beta fixed and put related series together, which is the
