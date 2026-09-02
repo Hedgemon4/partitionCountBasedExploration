@@ -159,9 +159,9 @@ SARSA_LAYOUT = Layout(
 
 @dataclasses.dataclass(frozen=True)
 class Args:
-    root_dir: Path = Path("data/atari57_seperate_heads_sarsa_sweep_partial")
+    root_dir: Path = Path("data/atari57_seperate_heads_sarsa_sweep")
     """Sweep dir containing <game>/beta_*/intrinsic_gamma_*/epsilon_*/seed_*/."""
-    output_dir: Path = Path("graphs/atari57_seperate_heads_sarsa_sweep_partial")
+    output_dir: Path = Path("graphs/atari57_sarsa_figures/individual")
     """Written to <output_dir>/<score>/ -- summary.csv plus one dir per game."""
     scores: tuple[Literal["final", "auc"], ...] = ("final", "auc")
     """Ranking metrics; each gets its own output tree. One score halves the figures."""
