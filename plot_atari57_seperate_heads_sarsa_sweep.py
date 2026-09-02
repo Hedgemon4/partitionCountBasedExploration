@@ -122,11 +122,15 @@ METRICS = {
     # Per-step bonus magnitude, as against the episode sum above. The UCB bonus decays
     # as states are revisited, which only this one shows.
     "intrinsic_reward": Metric("intrinsic_reward_mean", "Mean per-step count bonus"),
+    # "Fraction of visited states", not "P(...)": this is the mean of a 0/1 indicator over
+    # the (step, env) decision points in an update. Reading it as a probability would need
+    # a reference distribution, and the only candidate is the agent's own visitation
+    # measure -- which moves as the policy learns and differs between beta arms.
     "divergence": Metric(
-        "intrinsic_action_divergence", "P(intrinsic changes greedy action)"
+        "intrinsic_action_divergence", "Fraction of visited states, greedy action changed"
     ),
     "override": Metric(
-        "intrinsic_action_override", "P(intrinsic changes taken action)"
+        "intrinsic_action_override", "Fraction of visited states, taken action changed"
     ),
     "q": Metric("q_values", "Mean selected $Q_e$"),
     "intrinsic_q": Metric("intrinsic_q_values", "Mean selected $Q_i$"),

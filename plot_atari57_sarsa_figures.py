@@ -126,6 +126,24 @@ STEP_KEY = "env_step"
 # so asking for the Q values and losses as well would triple a figure that is already
 # ~2.75 GB resident.
 FIGURE_METRICS = ("extrinsic", "divergence", "override")
+
+# Titles are written out rather than derived from METRICS[...].label. An axis label and a
+# title are different jobs: "Fraction of visited states, greedy action changed" is right on
+# an axis but reads as nonsense inside "Per-game ... by beta".
+CURVE_TITLES = {
+    "extrinsic": "Per-game episode return by β",
+    "divergence": "Per-game greedy-action changes by β",
+    "override": "Per-game taken-action changes by β",
+}
+
+# Short axis labels for the grid. METRICS[...].label is written for a full-size single
+# axes and is too long for a 2.3-inch panel -- it clips and collides with the heading. The
+# title above already says greedy vs taken, so the axis only has to name the quantity.
+CURVE_YLABELS = {
+    "extrinsic": "Episode return (EMA)",
+    "divergence": "Fraction of visited states",
+    "override": "Fraction of visited states",
+}
 SUMMARY_METRICS = {name: METRICS[name] for name in FIGURE_METRICS}
 
 
@@ -398,39 +416,26 @@ def hns_improvement(
     return 100.0 * (treatment - control) / span
 
 
+def bootstrap_mean_ci(
+    values: np.ndarray, n_boot: int, rng: np.random.Generator
+) -> tuple[float, float]:
+    """Percentile bootstrap of the seed mean, for the per-game grid's error bars.
+
+    One convention across the whole script: the curve-grid bands are the same estimator.
+    It is reported as a bootstrap and never as a 95% CI -- at 5 seeds a percentile
+    interval is a median 0.62x the width of the Student-t one and under-covers.
+    """
+    finite = values[np.isfinite(values)]
+    if finite.size < 2:
+        return (float("nan"), float("nan"))
+    boots = finite[rng.integers(0, finite.size, size=(n_boot, finite.size))].mean(axis=1)
+    return (float(np.percentile(boots, 2.5)), float(np.percentile(boots, 97.5)))
+
+
 MEASURES = {
     "pct": ("100·(β−control)/|control|  [%]", "control = 0"),
     "hns": ("human-normalised improvement  [pp]", "absent from atari_hns.csv"),
 }
-
-
-def bootstrap_ci(
-    treatment: np.ndarray,
-    control: np.ndarray,
-    measure: Callable[[float, float], float],
-    n_boot: int,
-    rng: np.random.Generator,
-) -> tuple[float, float]:
-    """Percentile bootstrap over seeds, resampling treatment and control together.
-
-    The control mean is itself estimated from 5 seeds, so holding it fixed would understate
-    the interval. At these seed counts the interval under-covers regardless -- it is
-    reported as a bootstrap, not as a 95% CI.
-    """
-    t = treatment[np.isfinite(treatment)]
-    c = control[np.isfinite(control)]
-    if t.size == 0 or c.size == 0:
-        return (float("nan"), float("nan"))
-    draws = np.empty(n_boot)
-    for i in range(n_boot):
-        draws[i] = measure(
-            float(t[rng.integers(0, t.size, t.size)].mean()),
-            float(c[rng.integers(0, c.size, c.size)].mean()),
-        )
-    finite = draws[np.isfinite(draws)]
-    if finite.size == 0:
-        return (float("nan"), float("nan"))
-    return (float(np.percentile(finite, 2.5)), float(np.percentile(finite, 97.5)))
 
 
 # ----------------------------------------------------------------------------------------
@@ -542,7 +547,8 @@ def plot_per_game_grid(
             continue
         panel = panels[index]
         means = np.array([panel["mean"].get(b, np.nan) for b in betas])
-        errs = np.array([panel["err"].get(b, np.nan) for b in betas])
+        los = np.array([panel["lo"].get(b, np.nan) for b in betas])
+        his = np.array([panel["hi"].get(b, np.nan) for b in betas])
         if np.isfinite(panel["control"]):
             ax.axhline(
                 panel["control"], color=theme["ink_secondary"], linewidth=0.9,
@@ -551,17 +557,25 @@ def plot_per_game_grid(
         for i, b in enumerate(betas):
             if not np.isfinite(means[i]):
                 continue
+            if np.isfinite(los[i]) and np.isfinite(his[i]):
+                yerr = np.array([[means[i] - los[i]], [his[i] - means[i]]])
+            else:
+                yerr = None
             ax.errorbar(
-                x[i], means[i], yerr=(0.0 if not np.isfinite(errs[i]) else errs[i]),
+                x[i], means[i], yerr=yerr,
                 fmt="o", markersize=4, color=colours[b],
                 ecolor=theme["ink_secondary"], elinewidth=1.0, capsize=2, zorder=3,
             )
         _style_panel(ax, theme)
         ax.set_title(panel["game"], color=theme["ink"], fontsize=9, loc="left")
         ax.set_xticks(x)
-        ax.set_xticklabels(betas, fontsize=7, rotation=45, ha="right")
-        if index // cols != rows - 1:
+        # Label the last *populated* panel in each column, not merely the last row: with
+        # 23 games in 8 columns the final row is short, so a "bottom row only" rule leaves
+        # the bottom panel of the empty columns unlabelled.
+        if index + cols < len(panels):
             ax.set_xticklabels([])
+        else:
+            ax.set_xticklabels(betas, fontsize=7, rotation=45, ha="right")
     top = _titles(fig, theme, title, subtitle)
     fig.tight_layout(rect=(0, 0, 1, top))
     _save(fig, path, args, theme)
@@ -588,7 +602,6 @@ def plot_curve_grid(
     theme = THEMES[args.theme]
     rows, cols = _grid_shape(len(panels), args.grid_cols)
     colours = beta_colours(betas)
-    spec = METRICS[metric]
     fig, axes = plt.subplots(
         rows, cols, figsize=(2.9 * cols, 2.3 * rows + 0.75), dpi=args.dpi, squeeze=False
     )
@@ -612,15 +625,31 @@ def plot_curve_grid(
                 np.linspace(0, steps.shape[0] - 1, args.curve_points).astype(int)
             )
             sub = smoothed[:, positions]
-            mean = np.nanmean(sub, axis=0)
+            # Count-normalised rather than nanmean, matching rolling_mean's idiom in
+            # plot_count_layer_sweep. The extrinsic EMA is NaN until a game's first episode
+            # ends -- up to 19 updates -- and the first subsampled position sits inside that
+            # run, so nanmean would warn "Mean of empty slice" on exactly one position per
+            # figure. The value is NaN either way and is dropped below; this just does not
+            # warn about it.
+            valid = np.isfinite(sub)
+            counts = valid.sum(axis=0)
+            mean = np.divide(
+                np.where(valid, sub, 0.0).sum(axis=0), counts,
+                out=np.full(counts.shape, np.nan, dtype=float), where=counts > 0,
+            )
             finite = np.isfinite(mean)
             if not finite.any():
                 continue
             n = sub.shape[0]
-            draws = rng.integers(0, n, size=(args.curve_boot, n))
-            boots = np.nanmean(sub[draws], axis=1)
-            # A position where every seed is NaN yields an all-NaN bootstrap column;
-            # percentile would warn and return NaN. Mask those out explicitly.
+            draws = rng.integers(0, n, size=(args.n_boot, n))
+            # Counts are per (draw, position): a resample can select only the NaN seeds at
+            # a position even where other seeds are finite there, so a column mask is not
+            # enough.
+            drawn_counts = valid[draws].sum(axis=1)
+            boots = np.divide(
+                np.where(valid, sub, 0.0)[draws].sum(axis=1), drawn_counts,
+                out=np.full(drawn_counts.shape, np.nan, dtype=float), where=drawn_counts > 0,
+            )
             usable = np.isfinite(boots).any(axis=0)
             lo = np.full(boots.shape[1], np.nan)
             hi = np.full(boots.shape[1], np.nan)
@@ -642,12 +671,13 @@ def plot_curve_grid(
         # negative, where a blanket floor would hide most of the curve.
         if np.isfinite(lowest) and lowest >= 0:
             ax.set_ylim(bottom=0)
-        if index // cols != rows - 1:
+        # As above: the last populated panel of each column carries the label.
+        if index + cols < len(panels):
             ax.set_xlabel("")
         else:
             ax.set_xlabel("Environment steps", color=theme["ink_secondary"], fontsize=8)
         if index % cols == 0:
-            ax.set_ylabel(spec.label, color=theme["ink_secondary"], fontsize=8)
+            ax.set_ylabel(CURVE_YLABELS[metric], color=theme["ink_secondary"], fontsize=8)
 
     handles = [
         plt.Line2D([], [], color=colours[b], linewidth=2.0, label=f"β={b}") for b in betas
@@ -676,6 +706,10 @@ def plot_improvement_bars(
     Symlog y-axis: the range runs to several hundred percent while the interesting region
     is a few tens, so a linear axis lets one bar flatten the rest. `linthresh` keeps the
     +-10 band linear so small effects stay readable.
+
+    No error bars, by choice. Nothing here indicates whether a bar differs from zero, and
+    at 5 seeds several of them do not -- the curve grids and the per-game grid are where
+    seed spread is shown.
     """
     theme = THEMES[args.theme]
     drawn = [b for b in bars if np.isfinite(b["value"])]
@@ -690,15 +724,6 @@ def plot_improvement_bars(
     )
     ax.axhline(0.0, color=theme["ink_secondary"], linewidth=1.0, zorder=2)
     ax.bar(x, values, width=0.72, color=colours, zorder=3, linewidth=0)
-    lo = np.array([b["lo"] for b in drawn])
-    hi = np.array([b["hi"] for b in drawn])
-    ok = np.isfinite(lo) & np.isfinite(hi)
-    if ok.any():
-        ax.errorbar(
-            x[ok], values[ok],
-            yerr=np.vstack([values[ok] - lo[ok], hi[ok] - values[ok]]).clip(min=0),
-            fmt="none", ecolor=theme["ink"], elinewidth=0.8, capsize=2, zorder=4,
-        )
     ax.set_yscale("symlog", linthresh=10.0)
     _style_panel(ax, theme, xlabel="Game", ylabel=ylabel)
     ax.set_xticks(x)
@@ -750,10 +775,9 @@ class Args:
     """Fraction of the run averaged for the "final" score. Matches the per-game script."""
     smooth: int = 200
     """Rolling-mean window in updates. Matches the per-game script."""
-    n_boot: int = 4000
-    """Bootstrap resamples for the improvement bars' intervals."""
-    curve_boot: int = 1000
-    """Bootstrap resamples for the curve-grid bands."""
+    n_boot: int = 2000
+    """Bootstrap resamples. One setting, because there is one convention: the per-game
+    grid's error bars and the curve-grid bands are the same percentile bootstrap."""
     curve_points: int = 300
     """x positions the curve bands are evaluated at. The curves are already smoothed, so
     bootstrapping all 24,414 updates buys nothing and costs a great deal of memory."""
@@ -846,21 +870,33 @@ def main(args: Args) -> None:
         print(f"  {len(cover)} coverage notes -> coverage.csv")
 
     for score in args.scores:
-        # The shared game ordering comes from the per_game best-beta pct improvement:
-        # pct because it is defined for all 57 games where hns covers only 49.
+        # Each improvement family orders by its own best-beta values -- pct by pct, hns by
+        # hns -- so each is internally consistent. The cost: the two families are no longer
+        # comparable left-to-right, since a game can sit in a different place in each.
         order_sel = select_per_game(cells, games, betas, score)
         order_best = _best_beta_per_game(order_sel, games, betas, score)
-        order_key: dict[str, float] = {}
-        for game in games:
+
+        def game_order(measure_fn: Callable[[str], float]) -> list[str]:
+            key = {g: measure_fn(g) for g in games}
+            return sorted(games, key=lambda g: (np.isfinite(key[g]), key[g]))
+
+        def _improvement_for_order(game: str, measure: str) -> float:
             beta = order_best.get(game)
             control = order_sel.chosen.get((game, CONTROL_BETA))
             cell = order_sel.chosen.get((game, beta)) if beta else None
-            order_key[game] = (
-                pct_improvement(cell.mean(score), control.mean(score))
-                if cell is not None and control is not None
-                else float("-inf")
-            )
-        ordered = sorted(games, key=lambda g: (np.isfinite(order_key[g]), order_key[g]))
+            if cell is None or control is None:
+                return float("-inf")
+            t, c = cell.mean(score), control.mean(score)
+            if measure == "pct":
+                return pct_improvement(t, c)
+            return hns_improvement(t, c, hns.get(game))
+
+        orders = {
+            m: game_order(lambda g, _m=m: _improvement_for_order(g, _m))
+            for m in ("pct", "hns")
+        }
+        # per_game_grid is not part of either improvement family; keep it on the pct order.
+        ordered = orders["pct"]
 
         for mode in args.selection:
             sel = SELECTORS[mode](cells, games, betas, score)
@@ -871,18 +907,14 @@ def main(args: Args) -> None:
             # --- per-game raw scores by beta -------------------------------------------
             panels = []
             for game in ordered:
-                means, errs = {}, {}
+                means, los, his = {}, {}, {}
                 for beta in betas:
                     cell = sel.chosen.get((game, beta))
                     if cell is None:
                         continue
-                    values = cell.scores[score]
                     means[beta] = cell.mean(score)
-                    finite = values[np.isfinite(values)]
-                    errs[beta] = (
-                        float(finite.std(ddof=1) / math.sqrt(finite.size))
-                        if finite.size > 1
-                        else np.nan
+                    los[beta], his[beta] = bootstrap_mean_ci(
+                        cell.scores[score], args.n_boot, rng
                     )
                 if means:
                     control = sel.chosen.get((game, CONTROL_BETA))
@@ -890,7 +922,8 @@ def main(args: Args) -> None:
                         {
                             "game": game,
                             "mean": means,
-                            "err": errs,
+                            "lo": los,
+                            "hi": his,
                             "control": control.mean(score) if control else np.nan,
                             "cells": {
                                 b: sel.chosen[(game, b)]
@@ -902,7 +935,7 @@ def main(args: Args) -> None:
             plot_per_game_grid(
                 panels, betas=betas,
                 title="Per-game raw scores by β",
-                subtitle=f"{base}\nOwn y-axis per panel, no normalisation · dashed line is that game's β=0 control · ±1 SEM",
+                subtitle=f"{base}\nOwn y-axis per panel, no normalisation · dashed line is that game's β=0 control · bars are a percentile bootstrap over seeds",
                 path=out / "per_game_grid.png", args=args,
             )
 
@@ -915,7 +948,7 @@ def main(args: Args) -> None:
                 )
                 plot_curve_grid(
                     panels, metric=metric, betas=betas,
-                    title=f"Per-game {METRICS[metric].label} by β",
+                    title=CURVE_TITLES[metric],
                     subtitle=f"{base}\nBands are a percentile bootstrap over seeds, smoothed over {args.smooth} updates{null}",
                     path=out / f"curve_grid_{metric}.png", args=args, rng=rng,
                 )
@@ -928,7 +961,7 @@ def main(args: Args) -> None:
                 ylabel, blank_reason = MEASURES[measure]
                 for target in [b for b in betas if b != CONTROL_BETA] + ["best"]:
                     bars, skipped = [], []
-                    for game in ordered:
+                    for game in orders[measure]:
                         beta = best.get(game) if target == "best" else target
                         control = sel.chosen.get((game, CONTROL_BETA))
                         cell = sel.chosen.get((game, beta)) if beta else None
@@ -943,12 +976,7 @@ def main(args: Args) -> None:
                         if not np.isfinite(value):
                             skipped.append(game)
                             continue
-                        lo, hi = bootstrap_ci(
-                            cell.scores[score], control.scores[score], fn, args.n_boot, rng
-                        )
-                        bars.append(
-                            {"game": game, "beta": beta, "value": value, "lo": lo, "hi": hi}
-                        )
+                        bars.append({"game": game, "beta": beta, "value": value})
                         if target == "best":
                             rows.append(
                                 {
@@ -957,7 +985,6 @@ def main(args: Args) -> None:
                                     "control": round(control.mean(score), 4),
                                     "treatment": round(cell.mean(score), 4),
                                     "improvement": round(value, 4),
-                                    "ci_lo": round(lo, 4), "ci_hi": round(hi, 4),
                                     "n_seeds": cell.n_seeds, "blank_reason": "",
                                 }
                             )
@@ -968,8 +995,7 @@ def main(args: Args) -> None:
                                     "game": game, "beta": best.get(game, ""),
                                     "measure": measure, "gamma_i": "", "epsilon": "",
                                     "control": "", "treatment": "", "improvement": "",
-                                    "ci_lo": "", "ci_hi": "", "n_seeds": "",
-                                    "blank_reason": blank_reason,
+                                    "n_seeds": "", "blank_reason": blank_reason,
                                 }
                             )
                     note = f" · omitted ({blank_reason}): {', '.join(skipped)}" if skipped else ""
@@ -977,7 +1003,7 @@ def main(args: Args) -> None:
                     plot_improvement_bars(
                         bars,
                         title=f"Improvement over β=0 — {label}",
-                        subtitle=f"{base}\nSymlog axis, linear within ±10 · error bars are a percentile bootstrap over seeds{note}",
+                        subtitle=f"{base}\nSymlog axis, linear within ±10{note}",
                         ylabel=ylabel,
                         path=out / f"improvement_{measure}_{'best_beta' if target == 'best' else f'beta_{target}'}.png",
                         args=args,
@@ -986,7 +1012,7 @@ def main(args: Args) -> None:
             write_rows(
                 rows,
                 ("game", "beta", "measure", "gamma_i", "epsilon", "control", "treatment",
-                 "improvement", "ci_lo", "ci_hi", "n_seeds", "blank_reason"),
+                 "improvement", "n_seeds", "blank_reason"),
                 out / "improvement.csv",
             )
             n_png = len(list(out.glob("*.png")))
