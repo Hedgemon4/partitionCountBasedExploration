@@ -145,6 +145,18 @@ CURVE_YLABELS = {
     "divergence": "Fraction of visited states",
     "override": "Fraction of visited states",
 }
+
+# Fixed y-limits where the metric's range is a property of the metric rather than of the
+# game. divergence and override are fractions bounded in [0, 1] by construction, so every
+# panel must share that axis -- autoscaling them would make a game peaking at 0.1 look
+# identical to one peaking at 1.0, which is the opposite of what the grid is for. Episode
+# return has no such bound and differs by orders of magnitude across games, so it stays
+# per-panel. None means autoscale.
+CURVE_YLIMS: dict[str, tuple[float, float] | None] = {
+    "extrinsic": None,
+    "divergence": (0.0, 1.0),
+    "override": (0.0, 1.0),
+}
 SUMMARY_METRICS = {name: METRICS[name] for name in FIGURE_METRICS}
 
 
@@ -669,9 +681,12 @@ def plot_curve_grid(
         _style_panel(ax, theme)
         ax.set_title(panel["game"], color=theme["ink"], fontsize=9, loc="left")
         ax.xaxis.set_major_formatter(million)
-        # Anchor at zero only when nothing plotted goes below it: several games score
-        # negative, where a blanket floor would hide most of the curve.
-        if np.isfinite(lowest) and lowest >= 0:
+        limits = CURVE_YLIMS[metric]
+        if limits is not None:
+            ax.set_ylim(*limits)
+        elif np.isfinite(lowest) and lowest >= 0:
+            # Anchor at zero only when nothing plotted goes below it: several games score
+            # negative, where a blanket floor would hide most of the curve.
             ax.set_ylim(bottom=0)
         # As above: the last populated panel of each column carries the label.
         if index + cols < len(panels):

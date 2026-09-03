@@ -69,6 +69,14 @@ class Metric:
     key: str  # the metrics.npz key
     label: str  # y-axis label
     log: bool = False  # losses span orders of magnitude
+    # Fixed y-limits for a metric whose range is a property of the *metric*, not of the
+    # game -- a fraction bounded in [0, 1], say. Autoscaling those makes a game peaking at
+    # 0.1 look like one peaking at 1.0, which defeats comparing figures across games.
+    # None (the default) keeps the existing autoscale, so nothing changes for the metrics
+    # that already exist. Do not set it for a quantity that only *looks* bounded: the
+    # exploration share beta*Q_i/(Q_e + beta*Q_i) reaches -16.4 on freeway, and clamping it
+    # would hide that.
+    ylim: tuple[float, float] | None = None
 
 
 # The two series every sweep in this repo has. A caller wanting more (the
@@ -497,7 +505,10 @@ def plot_curves(
         )
 
     _style_axes(ax, theme, spec.label)
-    if spec.log:
+    if spec.ylim is not None:
+        # The metric declares its own range; see Metric.ylim.
+        ax.set_ylim(*spec.ylim)
+    elif spec.log:
         # Losses fall across orders of magnitude, so a linear axis flattens the
         # whole tail against zero. A log axis has no floor to anchor.
         ax.set_yscale("log")
@@ -610,7 +621,14 @@ def plot_combo_metrics(
         )
 
     _style_axes(ax, theme, ylabel)
-    if log:
+    # This figure overlays several metrics on one axes, so a declared ylim applies only
+    # when they all declare the same one -- otherwise the limits would belong to whichever
+    # series happened to be listed first.
+    declared = {metrics[name].ylim for name, _, _ in series if name in metrics}
+    shared_ylim = declared.pop() if len(declared) == 1 else None
+    if shared_ylim is not None:
+        ax.set_ylim(*shared_ylim)
+    elif log:
         ax.set_yscale("log")
     elif lowest_mean >= 0:
         ax.set_ylim(bottom=0)

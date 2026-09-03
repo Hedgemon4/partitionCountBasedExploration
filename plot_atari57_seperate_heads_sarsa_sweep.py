@@ -127,10 +127,12 @@ METRICS = {
     # a reference distribution, and the only candidate is the agent's own visitation
     # measure -- which moves as the policy learns and differs between beta arms.
     "divergence": Metric(
-        "intrinsic_action_divergence", "Fraction of visited states, greedy action changed"
+        "intrinsic_action_divergence", "Fraction of visited states, greedy action changed",
+        ylim=(0.0, 1.0),
     ),
     "override": Metric(
-        "intrinsic_action_override", "Fraction of visited states, taken action changed"
+        "intrinsic_action_override", "Fraction of visited states, taken action changed",
+        ylim=(0.0, 1.0),
     ),
     "q": Metric("q_values", "Mean selected $Q_e$"),
     "intrinsic_q": Metric("intrinsic_q_values", "Mean selected $Q_i$"),
