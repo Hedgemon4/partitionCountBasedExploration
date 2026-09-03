@@ -60,13 +60,14 @@ Neither works everywhere, and they fail on *different* games:
   hns = 100*(score - random)/(human - random),  reported as hns_beta - hns_control
         The denominator is a positive range by construction, so zero and negative scores
         are fine. But it amplifies where human-random is narrow -- double_dunk's range is
-        3.1, so it reads +357pp where pct reads a sane +170% -- and atari_hns.csv covers
-        only 49 of the 57 games, missing berzerk, defender, phoenix, pitfall, skiing,
-        solaris, surround and yars_revenge.
+        3.1, so it reads +357pp where pct reads a sane +170%. It is also only as complete
+        as atari_hns.csv, which is checked at load rather than assumed: a game with no row
+        there simply cannot be expressed on this measure.
 
-So pct rescues pitfall and skiing, hns rescues montezuma, and between them all 57 games
-are covered. Games a measure cannot express are named in that figure's subtitle and given
-a reason in improvement.csv -- never silently dropped.
+So pct is the one that breaks on a zero control and hns is the one that breaks on a
+missing reference, and between them every game is covered. Games a measure cannot express
+are named in that figure's subtitle and given a reason in improvement.csv -- never
+silently dropped.
 
 Both families use a symlog y-axis: the range runs to several hundred percent while the
 interesting region is a few tens, and a linear axis lets one bar flatten the rest.
@@ -382,7 +383,8 @@ SELECTORS: dict[str, Callable[..., Selection]] = {
 
 
 def load_hns(path: Path) -> dict[str, tuple[float, float]]:
-    """game -> (random, human) from atari_hns.csv. 49 of the 57 games are present."""
+    """game -> (random, human) from atari_hns.csv. Games absent from the file are absent
+    from the mapping, and callers treat that as "not expressible on this measure"."""
     out: dict[str, tuple[float, float]] = {}
     with open(path, newline="") as handle:
         for row in csv.DictReader(handle):
@@ -759,7 +761,7 @@ class Args:
     output_dir: Path = Path("graphs/atari57_sarsa_figures/summary")
     """Figures and CSVs are written to <output_dir>/<score>/<selection>/."""
     hns_csv: Path = Path("atari_hns.csv")
-    """Random and human reference scores. Covers 49 of the 57 games."""
+    """Random and human reference scores, one row per game."""
     games_file: Path = Path("atari57_games.txt")
     """Newline-separated game list, used only to report games with no data at all."""
     scores: tuple[Literal["final", "auc"], ...] = ("final", "auc")
