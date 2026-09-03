@@ -1,0 +1,1 @@
+--environment amidar --force-xla --output-folder-name amidar_counts_baseline_quick_fix/seed_SEED

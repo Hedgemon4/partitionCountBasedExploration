@@ -13,16 +13,16 @@ class Args:
     """Plotting script to group and compare PQN runs based on config.yaml."""
 
     # The root directory to search for metrics.npz files
-    root_dir: Path = Path("data/local/cartpole_fta_testing")
+    root_dir: Path = Path("data/venture_beta_10seed_sweep/beta_0.25")
 
     # The key in the .npz file to visualize
-    metric: str = "extrinsic_return_ema"
+    metric: str = "extrinsic_return_per_game_ema"
 
     # Window size for simple moving average smoothing (1 = no smoothing)
-    smooth: int = 1
+    smooth: int = 200
 
     # Directory to save the resulting plots
-    output_dir: Path = Path("cartpole_fta_testing")
+    output_dir: Path = Path("graphs/venture_beta_10seed_sweep/beta_0.25")
 
     # Config keys to group by. A separate plot will be generated for each combination.
     # Note: Use dot notation for nested yaml keys, e.g., 'network.hidden_size'

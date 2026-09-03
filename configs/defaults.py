@@ -9,6 +9,14 @@ from configs.networks import (
     QNetwork,
     QNetworkCartpole,
     QNetworkCountsWithNextStatePrediction,
+    QNetworkCNNCountsDefaultConfig,
+    QNetworkCNNConfig,
+    QNetworkCNNFTAConfig,
+    QNetworkCNNTwoFTAConfig,
+    QNetworkCNNTwoReluConfig,
+    QNetworkCNNCountsFTAConfig,
+    QNetworkCNNSeperateHeadsConfig,
+    QNetworkCNNSeperateHeadsFTAConfig,
 )
 
 
@@ -286,3 +294,129 @@ class MountainCarWithIntrinsicRewardsAndStatePredictionConfig(BaseConfig):
 
     # Network Activation Configs
     network: NetworkConfig = QNetworkCountsWithNextStatePrediction()
+
+
+@chex.dataclass(frozen=True)
+class AtariConfig:
+    # Experiment Configs
+    seed: int = 0
+    num_seeds: int = 1
+    num_episodes_for_average: int = 30
+
+    # Experiment Configs
+    output_folder_name: str = "atari_testing"
+
+    # Algorithm Configs
+    initial_learning_rate: float = 0.00025
+    final_learning_rate: float = 0.00025
+    num_epochs: int = 2
+    num_minibatches: int = 32
+    gamma: float = 0.99
+    lambda_returns: bool = True
+    lam: float = 0.65
+    max_grad_norm: float = 10.0
+    reward_scale: float = 1.0
+    sarsa_returns: bool = False
+
+    # Env Configs
+    environment: str = "pong"
+    num_environments: int = 128
+    num_steps: int = 32
+    total_time_steps: float = 1e8
+    framestack: int = 4
+    life_loss_info: bool = False
+    force_xla: bool = False
+    # 0 = ALE auto, which spawns min(num_envs, hardware_concurrency) threads and
+    # oversubscribes when multiple seeds share a node. Set per-seed to its core count.
+    num_env_threads: int = 0
+
+    # Exploration Configs
+    epsilon_start: float = 1.0
+    epsilon_end: float = 0.001
+    epsilon_decay: float = 0.1
+
+    # Network Activation Configs
+    network: NetworkConfig = QNetworkCNNConfig()
+
+
+@chex.dataclass(frozen=True)
+class AtariFTAConfig(AtariConfig):
+    network: NetworkConfig = QNetworkCNNFTAConfig()
+
+
+@chex.dataclass(frozen=True)
+class AtariTwoFTAConfig(AtariConfig):
+    network: NetworkConfig = QNetworkCNNTwoFTAConfig()
+
+
+@chex.dataclass(frozen=True)
+class AtariTwoReluConfig(AtariConfig):
+    network: NetworkConfig = QNetworkCNNTwoReluConfig()
+
+
+@chex.dataclass(frozen=True)
+class AtariCountsConfig:
+    # Experiment Configs
+    seed: int = 0
+    num_seeds: int = 1
+    num_episodes_for_average: int = 30
+
+    # Experiment Configs
+    output_folder_name: str = "atari_counts_testing"
+
+    # Algorithm Configs
+    initial_learning_rate: float = 0.00025
+    final_learning_rate: float = 0.00025
+    num_epochs: int = 2
+    num_minibatches: int = 32
+    gamma: float = 0.99
+    lambda_returns: bool = True
+    lam: float = 0.65
+    max_grad_norm: float = 10.0
+    reward_scale: float = 1.0
+    sarsa_returns: bool = False
+
+    # Env Configs
+    environment: str = "pong"
+    num_environments: int = 128
+    num_steps: int = 32
+    total_time_steps: float = 1e8
+    framestack: int = 4
+    life_loss_info: bool = False
+    force_xla: bool = False
+    # 0 = ALE auto, which spawns min(num_envs, hardware_concurrency) threads and
+    # oversubscribes when multiple seeds share a node. Set per-seed to its core count.
+    num_env_threads: int = 0
+
+    # Exploration Configs
+    beta: float = 0.5
+    epsilon_start: float = 1.0
+    epsilon_end: float = 0.001
+    epsilon_decay: float = 0.1
+
+    # Env timesteps between each count snapshot (0 = save only at end of training)
+    count_save_timestep_interval: float = 5e6
+
+    # Network Activation Configs
+    network: NetworkConfig = QNetworkCNNCountsDefaultConfig()
+
+
+@chex.dataclass(frozen=True)
+class AtariCountsOneBlockConfig(AtariCountsConfig):
+    network: NetworkConfig = QNetworkCNNCountsFTAConfig()
+
+
+@chex.dataclass(frozen=True)
+class AtariCountsSeperateHeadsConfig(AtariCountsConfig):
+    output_folder_name: str = "atari_seperate_heads_testing"
+    # Discount and trace for the intrinsic head. Defaulted to the extrinsic values
+    # rather than falling back to them at runtime, so the dumped config.yaml
+    # records what actually ran.
+    intrinsic_gamma: float = 0.99
+    intrinsic_lam: float = 0.65
+    network: NetworkConfig = QNetworkCNNSeperateHeadsConfig()
+
+
+@chex.dataclass(frozen=True)
+class AtariCountsSeperateHeadsOneBlockConfig(AtariCountsSeperateHeadsConfig):
+    network: NetworkConfig = QNetworkCNNSeperateHeadsFTAConfig()

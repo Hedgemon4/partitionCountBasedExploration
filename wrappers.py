@@ -1,9 +1,10 @@
-import struct
 from functools import partial
-from typing import Tuple, Optional, Union
+from typing import Tuple, Optional, Union, Any, cast
 
 import chex
 import jax
+from ale_py import AtariVectorEnv
+from gymnasium.vector import AutoresetMode
 from gymnax.environments import environment, spaces
 import jax.numpy as jnp
 import numpy as np
@@ -137,3 +138,254 @@ class PessimisticMountainCarWrapper(GymnaxWrapper):
         )
         reward = jnp.where(goal_reached, 1.0, 0.0)
         return obs, state, reward, done, info
+
+
+@chex.dataclass(frozen=True)
+class LogEnvStateAtari:
+    handle: jax.Array
+    episode_returns: jax.Array
+    episode_lengths: jax.Array
+    returned_episode_returns: jax.Array
+    returned_episode_lengths: jax.Array
+    clipped_episode_returns: jax.Array
+    clipped_returned_episode_returns: jax.Array
+    timestep: jax.Array
+
+
+class ALEGymnaxWrapperXLA:
+    """Fast XLA-compiled Atari environment wrapper."""
+
+    def __init__(self, env_name, num_envs, seed, **kwargs):
+        self._env = AtariVectorEnv(
+            env_name,
+            num_envs=num_envs,
+            autoreset_mode=AutoresetMode.SAME_STEP,
+            reward_clipping=False,
+            **kwargs,
+        )
+        self.init_handle, self._reset, self._step = self._env.xla()
+        self.init_reset_seed = seed
+        self.num_envs = num_envs
+
+    def reset(
+        self, key: chex.PRNGKey, params: Optional[environment.EnvParams] = None
+    ) -> Tuple[chex.Array, LogEnvStateAtari]:
+        handle, (obs, _) = self._reset(self.init_handle, seed=self.init_reset_seed)
+        env_state = LogEnvStateAtari(
+            handle=jnp.array(handle),
+            episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            episode_lengths=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            returned_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            returned_episode_lengths=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            clipped_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            clipped_returned_episode_returns=jnp.zeros(
+                self.num_envs, dtype=jnp.float32
+            ),
+            timestep=jnp.zeros(self.num_envs, dtype=jnp.float32),
+        )
+        return obs, env_state
+
+    @partial(jax.jit, static_argnums=(0,))
+    def step(
+        self,
+        key: chex.PRNGKey,
+        state: LogEnvStateAtari,
+        action: chex.Array,
+        params: Optional[environment.EnvParams] = None,
+    ) -> Tuple[chex.Array, jax.Array, chex.Array, chex.Array, dict[str, Any]]:
+        if action.ndim == 0:
+            action = jnp.expand_dims(action, axis=0)  # envpool always expects batch dim
+
+        handle, (obs, reward, term, trunc, info) = self._step(state.handle, action)
+        done = term | trunc
+
+        clipped_reward = jnp.clip(reward, -1.0, 1.0)
+        new_episode_return = state.episode_returns + reward
+        new_episode_length = state.episode_lengths + 1
+        new_clipped_return = state.clipped_episode_returns + clipped_reward
+
+        next_state = LogEnvStateAtari(
+            handle=handle,
+            episode_returns=(new_episode_return) * (1 - done),
+            episode_lengths=(new_episode_length) * (1 - done),
+            returned_episode_returns=jnp.where(
+                done,
+                new_episode_return,
+                state.returned_episode_returns,
+            ),
+            returned_episode_lengths=jnp.where(
+                done,
+                new_episode_length,
+                state.returned_episode_lengths,
+            ),
+            clipped_episode_returns=new_clipped_return * (1 - done),
+            clipped_returned_episode_returns=jnp.where(
+                done,
+                new_clipped_return,
+                state.clipped_returned_episode_returns,
+            ),
+            timestep=state.timestep + 1,
+        )
+
+        info["returned_episode_returns"] = next_state.returned_episode_returns
+        info["returned_episode_lengths"] = next_state.returned_episode_lengths
+        info["clipped_returned_episode_returns"] = (
+            next_state.clipped_returned_episode_returns
+        )
+        info["timestep"] = state.timestep
+        info["returned_episode"] = done
+        info["reward"] = reward
+
+        return obs, next_state, clipped_reward, done, info
+
+    def observation_space(self, params: Optional[environment.EnvParams] = None):
+        obs_space = cast(Any, self._env.observation_space)
+        return spaces.Box(
+            low=obs_space.low,
+            high=obs_space.high,
+            shape=obs_space.shape[1:],
+            dtype=obs_space.dtype,
+        )
+
+    def action_space(self, params: Optional[environment.EnvParams] = None):
+        action_space = cast(Any, self._env.action_space)
+        return spaces.Discrete(
+            num_categories=action_space.nvec[0],
+        )
+
+
+class ALEGymnaxWrapperStandard:
+    """Standard ale_py Atari environment wrapper with JAX compatibility."""
+
+    def __init__(self, env_name, num_envs, seed, **kwargs):
+        self._env = AtariVectorEnv(
+            env_name,
+            num_envs=num_envs,
+            autoreset_mode=AutoresetMode.SAME_STEP,
+            reward_clipping=False,
+            **kwargs,
+        )
+        self._env.reset(seed=seed)
+        self.init_reset_seed = seed
+        self.num_envs = num_envs
+
+    def reset(
+        self, key: chex.PRNGKey, params: Optional[environment.EnvParams] = None
+    ) -> Tuple[chex.Array, LogEnvStateAtari]:
+        obs, _ = self._env.reset(seed=self.init_reset_seed)
+        print(f"Num envs: {self.num_envs}")
+        env_state = LogEnvStateAtari(
+            handle=None,
+            episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            episode_lengths=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            returned_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            returned_episode_lengths=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            clipped_episode_returns=jnp.zeros(self.num_envs, dtype=jnp.float32),
+            clipped_returned_episode_returns=jnp.zeros(
+                self.num_envs, dtype=jnp.float32
+            ),
+            timestep=jnp.zeros(self.num_envs, dtype=jnp.float32),
+        )
+        return obs, env_state
+
+    def step(
+        self,
+        key: chex.PRNGKey,
+        state: LogEnvStateAtari,
+        action: chex.Array,
+        params: Optional[environment.EnvParams] = None,
+    ) -> Tuple[chex.Array, LogEnvStateAtari, chex.Array, chex.Array, dict[str, Any]]:
+        if action.ndim == 0:
+            action = jnp.expand_dims(action, axis=0)
+
+        # Use pure_callback to call non-JAX ale_py from inside JIT
+        obs, reward, term, trunc, _ = self._step_callback(action)
+        reward = jnp.atleast_1d(jnp.asarray(reward, dtype=jnp.float32))
+        term = jnp.atleast_1d(jnp.asarray(term, dtype=jnp.float32))
+        trunc = jnp.atleast_1d(jnp.asarray(trunc, dtype=jnp.float32))
+        done = jnp.logical_or(term, trunc)
+
+        clipped_reward = jnp.clip(reward, -1.0, 1.0)
+        new_episode_return = state.episode_returns + reward
+        new_episode_length = state.episode_lengths + 1
+        new_clipped_return = state.clipped_episode_returns + clipped_reward
+
+        next_state = LogEnvStateAtari(
+            handle=None,
+            episode_returns=(new_episode_return) * (1 - done),
+            episode_lengths=(new_episode_length) * (1 - done),
+            returned_episode_returns=jnp.where(
+                done,
+                new_episode_return,
+                state.returned_episode_returns,
+            ),
+            returned_episode_lengths=jnp.where(
+                done,
+                new_episode_length,
+                state.returned_episode_lengths,
+            ),
+            clipped_episode_returns=new_clipped_return * (1 - done),
+            clipped_returned_episode_returns=jnp.where(
+                done,
+                new_clipped_return,
+                state.clipped_returned_episode_returns,
+            ),
+            timestep=state.timestep + 1,
+        )
+
+        info = {}  # Empty info dict for standard ale_py
+        info["returned_episode_returns"] = next_state.returned_episode_returns
+        info["returned_episode_lengths"] = next_state.returned_episode_lengths
+        info["clipped_returned_episode_returns"] = (
+            next_state.clipped_returned_episode_returns
+        )
+        info["timestep"] = state.timestep
+        info["returned_episode"] = done
+        info["reward"] = reward
+
+        return obs, next_state, clipped_reward, done, info
+
+    def _step_callback(
+        self, action: chex.Array
+    ) -> Tuple[chex.Array, chex.Array, chex.Array, chex.Array]:
+        """Wrapped callback for use inside JIT-compiled functions."""
+        obs_space = cast(Any, self._env.observation_space)
+        obs_shape = obs_space.shape
+
+        obs, rew, term, trunc, efn = jax.pure_callback(
+            lambda a: self._step_callback_impl(a),
+            (
+                jax.ShapeDtypeStruct(obs_shape, dtype=np.uint8),
+                jax.ShapeDtypeStruct((self.num_envs,), dtype=np.float32),
+                jax.ShapeDtypeStruct((self.num_envs,), dtype=np.bool_),
+                jax.ShapeDtypeStruct((self.num_envs,), dtype=np.bool_),
+                jax.ShapeDtypeStruct((self.num_envs,), dtype=np.int32),
+            ),
+            action,
+        )
+
+        return obs, rew, term, trunc, efn
+
+    def _step_callback_impl(
+        self, action: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Implementation of step callable from pure_callback."""
+        action_np = np.asarray(action)
+        obs, rew, term, trunc, info = self._env.step(action_np)
+        rew = np.asarray(rew, dtype=np.float32)
+        return obs, rew, term, trunc, info["episode_frame_number"]
+
+    def observation_space(self, params: Optional[environment.EnvParams] = None):
+        obs_space = cast(Any, self._env.observation_space)
+        return spaces.Box(
+            low=obs_space.low,
+            high=obs_space.high,
+            shape=obs_space.shape[1:],
+            dtype=obs_space.dtype,
+        )
+
+    def action_space(self, params: Optional[environment.EnvParams] = None):
+        action_space = cast(Any, self._env.action_space)
+        return spaces.Discrete(
+            num_categories=action_space.nvec[0],
+        )

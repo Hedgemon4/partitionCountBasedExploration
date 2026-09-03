@@ -1,0 +1,12 @@
+--environment solaris --force-xla --no-sarsa-returns --seed 0 --output-folder-name atari4_baseline_probe/solaris/qlearning/seed_0
+--environment solaris --force-xla --no-sarsa-returns --seed 1 --output-folder-name atari4_baseline_probe/solaris/qlearning/seed_1
+--environment solaris --force-xla --no-sarsa-returns --seed 2 --output-folder-name atari4_baseline_probe/solaris/qlearning/seed_2
+--environment alien --force-xla --no-sarsa-returns --seed 0 --output-folder-name atari4_baseline_probe/alien/qlearning/seed_0
+--environment alien --force-xla --no-sarsa-returns --seed 1 --output-folder-name atari4_baseline_probe/alien/qlearning/seed_1
+--environment alien --force-xla --no-sarsa-returns --seed 2 --output-folder-name atari4_baseline_probe/alien/qlearning/seed_2
+--environment freeway --force-xla --no-sarsa-returns --seed 0 --output-folder-name atari4_baseline_probe/freeway/qlearning/seed_0
+--environment freeway --force-xla --no-sarsa-returns --seed 1 --output-folder-name atari4_baseline_probe/freeway/qlearning/seed_1
+--environment freeway --force-xla --no-sarsa-returns --seed 2 --output-folder-name atari4_baseline_probe/freeway/qlearning/seed_2
+--environment amidar --force-xla --no-sarsa-returns --seed 0 --output-folder-name atari4_baseline_probe/amidar/qlearning/seed_0
+--environment amidar --force-xla --no-sarsa-returns --seed 1 --output-folder-name atari4_baseline_probe/amidar/qlearning/seed_1
+--environment amidar --force-xla --no-sarsa-returns --seed 2 --output-folder-name atari4_baseline_probe/amidar/qlearning/seed_2

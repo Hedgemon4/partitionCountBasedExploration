@@ -1,0 +1,2 @@
+fta --environment amidar --force-xla --output-folder-name amidar_fta/seed_SEED
+fta-two-layer --environment amidar --force-xla --output-folder-name amidar_fta_two_layer/seed_SEED

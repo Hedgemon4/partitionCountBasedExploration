@@ -1,0 +1,10 @@
+--environment breakout --force-xla --seed 0 --output-folder-name breakout_baseline/seed_0
+--environment breakout --force-xla --seed 1 --output-folder-name breakout_baseline/seed_1
+--environment breakout --force-xla --seed 2 --output-folder-name breakout_baseline/seed_2
+--environment breakout --force-xla --seed 3 --output-folder-name breakout_baseline/seed_3
+--environment breakout --force-xla --seed 4 --output-folder-name breakout_baseline/seed_4
+--environment breakout --force-xla --seed 5 --output-folder-name breakout_baseline/seed_5
+--environment breakout --force-xla --seed 6 --output-folder-name breakout_baseline/seed_6
+--environment breakout --force-xla --seed 7 --output-folder-name breakout_baseline/seed_7
+--environment breakout --force-xla --seed 8 --output-folder-name breakout_baseline/seed_8
+--environment breakout --force-xla --seed 9 --output-folder-name breakout_baseline/seed_9

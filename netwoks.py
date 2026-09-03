@@ -1,24 +1,30 @@
+from unittest.main import main
+
 import equinox as eqx
 import jax
 from jax import Array
 import jax.numpy as jnp
 from jax.nn import one_hot
 
-from activations import make_activation
+from layers import make_activation, ChannelsLayerNorm
 from configs.networks import (
     QNetwork as QNetworkConfig,
     QNetworkCartpole as QNetworkCartpoleConfig,
     QNetworkCounts as QNetworkCountsConfig,
     QNetworkCountsWithNextStatePrediction as QNetworkCountsWithNextStatePredictionConfig,
+    QNetworkCNNCountsTwoBlockConfig,
+    CNNNetworkConfig,
 )
 
 
 class QNetwork(eqx.Module):
-    layers: list
-    num_bins: int = 10
+    blocks: list
+    value_head: list
+    num_bins: int
 
     def __init__(self, input_size, num_actions, key, network_config):
-        self.layers = []
+        self.blocks = []
+        self.num_bins = 10
         blocks = network_config.blocks
         keys = jax.random.split(key, len(blocks) + 1)
 
@@ -30,15 +36,15 @@ class QNetwork(eqx.Module):
 
             # We need to flatten the output of the activation if there were multiple bins in the previous layer, since each bin will be treated as a separate feature for the next layer
             if previous_bins > 1:
-                self.layers.append(eqx.nn.Lambda(jnp.ravel))
+                self.blocks.append(eqx.nn.Lambda(jnp.ravel))
 
-            self.layers.append(
+            self.blocks.append(
                 eqx.nn.Linear(
                     in_features=input_features, out_features=hidden_size, key=keys[i]
                 )
             )
 
-            self.layers.append(
+            self.blocks.append(
                 eqx.nn.LayerNorm(
                     hidden_size,
                     use_weight=learnable_norm_params,
@@ -47,23 +53,29 @@ class QNetwork(eqx.Module):
             )
             activation = make_activation(block.activation)
             num_bins = getattr(activation, "num_bins", 1)
-
-            self.layers.append(activation)
+            self.blocks.append(activation)
 
             # Compute the number of input features for the next layer, which will be the hidden size times the number of bins for the current activation
             input_features = hidden_size * num_bins
             previous_bins = num_bins
 
-        self.layers.append(
+        value_head_input_size = blocks[-1].hidden_size
+        if previous_bins > 1:
+            self.blocks.append(eqx.nn.Lambda(jnp.ravel))
+            value_head_input_size *= previous_bins
+
+        self.value_head = [
             eqx.nn.Linear(
-                in_features=blocks[-1].hidden_size,
+                in_features=value_head_input_size,
                 out_features=num_actions,
                 key=keys[-1],
             )
-        )
+        ]
 
     def __call__(self, x):
-        for layer in self.layers:
+        for layer in self.blocks:
+            x = layer(x)
+        for layer in self.value_head:
             x = layer(x)
         return x
 
@@ -84,6 +96,7 @@ class QNetworkCounts(eqx.Module):
     counts: Array
     count_layer: int
     num_bins: int
+    network_head_input_size: int
 
     def __init__(self, input_size, num_actions, key, network_config):
         self.blocks = []
@@ -145,26 +158,40 @@ class QNetworkCounts(eqx.Module):
                 num_actions,
                 blocks[self.count_layer - 1].hidden_size,
                 number_of_discrete_states,
-            )
+            ),
+            dtype=jnp.int32,
         )
+
+        value_head_input_size = blocks[-1].hidden_size
+        if previous_bins > 1:
+            self.blocks.append([eqx.nn.Lambda(jnp.ravel)])
+            value_head_input_size *= previous_bins
+        self.network_head_input_size = value_head_input_size
 
         self.value_head = [
             eqx.nn.Linear(
-                in_features=blocks[-1].hidden_size,
+                in_features=self.network_head_input_size,
                 out_features=num_actions,
                 key=keys[-1],
             ),
         ]
 
     def update_counts(self, discrete_states, actions):
-        updated_counts = self.counts.at[actions].add(discrete_states)
+        # Make sure counts are ints to avoid overflow
+        updated_counts = self.counts.at[actions].add(
+            discrete_states.astype(self.counts.dtype)
+        )
         return eqx.tree_at(lambda m: m.counts, self, updated_counts)
 
     def get_intrinsic_reward(self, discrete_state, action):
-        counts = self.counts * discrete_state
+        # Make sure counts are ints to avoid overflow
+        counts = self.counts * discrete_state.astype(self.counts.dtype)
         counts = jnp.sum(counts, axis=-1)
         counts = jnp.min(counts, axis=-1)
-        reward = jnp.sqrt(2 * jnp.log(jnp.sum(counts, axis=-1)) / counts[action])
+        total = jnp.sum(counts, axis=-1)
+        reward = jnp.sqrt(
+            2 * jnp.log(total.astype(jnp.float32)) / counts[action].astype(jnp.float32)
+        )
         return reward
 
     def __call__(self, x):
@@ -283,7 +310,8 @@ class QNetworkCountsWithNextStatePrediction(QNetworkCounts):
                 num_actions,
                 blocks[self.count_layer - 1].hidden_size,
                 number_of_discrete_states,
-            )
+            ),
+            dtype=jnp.int32,
         )
 
         self.value_head = [
@@ -349,6 +377,562 @@ class QNetworkCountsWithNextStatePrediction(QNetworkCounts):
         return total_loss, (selected_q_values, losses)
 
 
+class QNetworkCNNCounts(eqx.Module):
+    # Network
+    blocks: list
+    value_head: list
+    next_state_head: list
+    next_state_coef: float
+
+    # Counts
+    counts: Array
+    count_layer: int
+    num_bins: int
+    network_head_input_size: int
+
+    def __init__(self, input_size, num_actions, key, network_config):
+        # Need to change input size
+        keys = jax.random.split(key, 4)
+        if network_config.padding == "VALID":
+            network_input = 3136
+        elif network_config.padding == "SAME":
+            network_input = 7744
+        else:
+            raise ValueError("Unknown padding type")
+
+        self.next_state_coef = network_config.next_state_coef
+        self.next_state_head = []
+        self.count_layer = network_config.count_layer
+
+        # Construct CNN
+        self.blocks = []
+        # Activation config for each block position (parallel to self.blocks) so the
+        # count layer's activation can be recovered from a single count_layer index.
+        block_activation_configs = []
+        cnn_block_1 = []
+        cnn_block_2 = []
+        cnn_block_3 = []
+
+        cnn_block_1.append(
+            eqx.nn.Conv2d(
+                in_channels=int(input_size[0]),
+                out_channels=32,
+                kernel_size=(8, 8),
+                stride=(4, 4),
+                padding=network_config.padding,
+                key=keys[1],
+            ),
+        )
+        cnn_block_1.append(
+            ChannelsLayerNorm(32),
+        )
+        cnn_activation_1 = make_activation(network_config.cnn_activation_1)
+        cnn_block_1.append(cnn_activation_1)
+        num_bins = getattr(cnn_activation_1, "num_bins", 1)
+        if num_bins > 1:
+            cnn_block_2.append(eqx.nn.Lambda(merge_bins_into_channels))
+
+        cnn_block_2.append(
+            eqx.nn.Conv2d(
+                # If block 1 used a tiling activation, merge_bins_into_channels has
+                # folded its num_bins into the channel axis, so scale in_channels.
+                in_channels=32 * num_bins,
+                out_channels=64,
+                kernel_size=(4, 4),
+                stride=(2, 2),
+                padding=network_config.padding,
+                key=keys[2],
+            ),
+        )
+        cnn_block_2.append(
+            ChannelsLayerNorm(64),
+        )
+        cnn_activation_2 = make_activation(network_config.cnn_activation_2)
+        cnn_block_2.append(cnn_activation_2)
+        num_bins = getattr(cnn_activation_2, "num_bins", 1)
+        if num_bins > 1:
+            cnn_block_3.append(eqx.nn.Lambda(merge_bins_into_channels))
+
+
+        cnn_block_3.append(
+            eqx.nn.Conv2d(
+                # If block 2 used a tiling activation, merge_bins_into_channels has
+                # folded its num_bins into the channel axis, so scale in_channels.
+                in_channels=64 * num_bins,
+                out_channels=64,
+                kernel_size=(3, 3),
+                stride=(1, 1),
+                padding=network_config.padding,
+                key=keys[3],
+            ),
+        )
+        cnn_block_3.append(ChannelsLayerNorm(64))
+        # Ravel before the activation so that, if this block is the count layer, its
+        # FTA output is a flat (features, num_bins) rather than a spatial map.
+        cnn_block_3.append(eqx.nn.Lambda(jnp.ravel))
+        cnn_activation_3 = make_activation(network_config.cnn_activation_3)
+        cnn_block_3.append(cnn_activation_3)
+        previous_bins = getattr(cnn_activation_3, "num_bins", 1)
+
+        self.blocks.append(cnn_block_1)
+        self.blocks.append(cnn_block_2)
+        self.blocks.append(cnn_block_3)
+        block_activation_configs.extend(
+            [
+                network_config.cnn_activation_1,
+                network_config.cnn_activation_2,
+                network_config.cnn_activation_3,
+            ]
+        )
+
+        blocks = network_config.blocks
+        input_features = network_input * previous_bins
+
+        loop_key, key = jax.random.split(keys[0], 2)
+
+        for i, block in enumerate(blocks):
+            loop_key, subkey = jax.random.split(loop_key, 2)
+            layer = []
+            hidden_size = block.hidden_size
+            learnable_norm_params = block.learnable_norm_params
+
+            # We need to flatten the output of the activation if there were multiple bins in the previous layer, since each bin will be treated as a separate feature for the next layer
+            if previous_bins > 1:
+                layer.append(eqx.nn.Lambda(jnp.ravel))
+
+            layer.append(
+                eqx.nn.Linear(
+                    in_features=input_features, out_features=hidden_size, key=subkey
+                )
+            )
+
+            layer.append(
+                eqx.nn.LayerNorm(
+                    hidden_size,
+                    use_weight=learnable_norm_params,
+                    use_bias=learnable_norm_params,
+                )
+            )
+            activation = make_activation(block.activation)
+            num_bins = getattr(activation, "num_bins", 1)
+            layer.append(activation)
+
+            self.blocks.append(layer)
+            block_activation_configs.append(block.activation)
+
+            # Compute the number of input features for the next layer, which will be the hidden size times the number of bins for the current activation
+            input_features = hidden_size * num_bins
+            previous_bins = num_bins
+
+        value_head_input_size = blocks[-1].hidden_size
+        if previous_bins > 1:
+            self.blocks.append([eqx.nn.Lambda(jnp.ravel)])
+            value_head_input_size *= previous_bins
+        self.network_head_input_size = value_head_input_size
+
+        self.value_head = [
+            eqx.nn.Linear(
+                in_features=self.network_head_input_size,
+                out_features=num_actions,
+                key=keys[-1],
+            ),
+        ]
+
+        # ---- Size the counts table and next-state head from a traced shape ----
+        # count_layer is a single 1-indexed position into self.blocks (conv blocks
+        # 1-3 followed by the MLP blocks). Trace the trunk up to that block to read
+        # the discrete representation's (*features, num_bins) shape, rather than
+        # deriving it analytically across the FTA / merge / ravel plumbing.
+        if not 1 <= self.count_layer <= len(self.blocks):
+            raise ValueError(
+                f"count_layer={self.count_layer} is out of range for "
+                f"{len(self.blocks)} blocks"
+            )
+
+        # The count layer must use a tiling activation (e.g. FTA); its num_bins is
+        # the trailing axis of the discrete representation. Guard on the activation
+        # itself, not the traced shape: a non-tiling layer has no bins axis, so the
+        # argmax in _discrete_representation would spuriously treat a feature axis as
+        # bins and slip past a shape-based check.
+        count_activation_config = block_activation_configs[self.count_layer - 1]
+        number_of_discrete_states = getattr(
+            make_activation(count_activation_config), "num_bins", 1
+        )
+        if number_of_discrete_states < 2:
+            raise ValueError(
+                f"Count layer (block {self.count_layer}) must use a tiling activation "
+                f"(num_bins >= 2) to produce a discrete representation; its activation "
+                f"has num_bins={number_of_discrete_states}"
+            )
+
+        trunk = self.blocks
+        count_layer = self.count_layer
+
+        def _trace_discrete(states):
+            x = states / 255.0
+            for i, block in enumerate(trunk):
+                for layer in block:
+                    x = layer(x)
+                if i + 1 == count_layer:
+                    # Static method: no instance state, safe on the half-built self.
+                    return self._discrete_representation(x)
+            raise ValueError("count_layer beyond number of blocks")
+
+        dummy_input = jax.ShapeDtypeStruct(shape=input_size, dtype=jnp.float32)
+        discrete_shape = eqx.filter_eval_shape(_trace_discrete, dummy_input).shape
+        feature_shape = discrete_shape[:-1]
+        assert discrete_shape[-1] == number_of_discrete_states, (
+            discrete_shape,
+            number_of_discrete_states,
+        )
+
+        self.num_bins = number_of_discrete_states
+        self.counts = jnp.ones(
+            (num_actions, *feature_shape, number_of_discrete_states),
+            dtype=jnp.int32,
+        )
+
+        # Next-state head predicts the count layer's continuous (*features, num_bins)
+        # features. A Linear emits a flat vector, which we reshape to *features and
+        # pass through the same tiling activation (which appends the num_bins axis).
+        #
+        # At next_state_coef == 0.0 the auxiliary term contributes nothing --
+        # total_loss = q_loss + 0.0 * next_state_loss, so the head only ever sees
+        # zero gradients -- so skip building it. That frees its parameters and,
+        # more importantly, lets the caller stop storing the per-transition target
+        # (~2 GB at peak for a spatial count layer). `key` is not used after this
+        # block, so not splitting it leaves every other parameter untouched.
+        if self.predicts_next_state:
+            feature_size = 1
+            for dim in feature_shape:
+                feature_size *= dim
+            reshape_target = tuple(feature_shape)
+
+            key, subkey = jax.random.split(key, 2)
+            self.next_state_head = [
+                eqx.nn.Linear(
+                    in_features=self.network_head_input_size,
+                    out_features=feature_size,
+                    key=subkey,
+                ),
+                eqx.nn.LayerNorm(feature_size),
+                eqx.nn.Lambda(lambda z: z.reshape(reshape_target)),
+                make_activation(count_activation_config),
+            ]
+
+
+    @property
+    def predicts_next_state(self) -> bool:
+        """Whether the auxiliary next-state head exists.
+
+        next_state_coef is a plain Python float, so it lands on the static side of
+        eqx.partition(model, eqx.is_array) and this is a compile-time decision.
+        """
+        return self.next_state_coef != 0.0
+
+    def update_counts(self, discrete_states, actions):
+        # Make sure counts are ints to avoid overflow
+        updated_counts = self.counts.at[actions].add(
+            discrete_states.astype(self.counts.dtype)
+        )
+        return eqx.tree_at(lambda m: m.counts, self, updated_counts)
+
+    def get_intrinsic_reward(self, discrete_state, action):
+        # counts: (num_actions, *features, num_bins); discrete_state: (*features, num_bins)
+        counts = self.counts * discrete_state.astype(self.counts.dtype)
+        # Sum over the bins axis to pick out the active bin's count at each feature.
+        counts = jnp.sum(counts, axis=-1)
+        # Least-visited feature location per action (min over all feature axes).
+        counts = jnp.min(counts, axis=tuple(range(1, counts.ndim)))
+        total = jnp.sum(counts, axis=-1)
+        reward = jnp.sqrt(
+            2 * jnp.log(total.astype(jnp.float32)) / counts[action].astype(jnp.float32)
+        )
+        return reward
+
+
+    def _trunk(self, x):
+        """Run the shared body, returning (head input, count-layer activation).
+
+        counts need no stop_gradient here: they are int32 (see __init__), and
+        eqx.filter_value_and_grad only differentiates inexact arrays, so they
+        receive None grads and never enter the optimizer state.
+        """
+        x = x / 255.0
+
+        for i, block in enumerate(self.blocks):
+            for layer in block:
+                x = layer(x)
+            # Depending on which layer is being used for counts, select the appropriate activation for the discrete representation
+            if i + 1 == self.count_layer:
+                discrete_activation = x
+
+        return x, discrete_activation
+
+    def _apply_next_state_head(self, shared_output):
+        # None rather than the empty-head fall-through, which would return
+        # shared_output -- an array of the wrong shape for this contract, so a
+        # misuse would pass silently instead of failing.
+        if not self.predicts_next_state:
+            return None
+        predicted_next_state = shared_output
+        for layer in self.next_state_head:
+            predicted_next_state = layer(predicted_next_state)
+        return predicted_next_state
+
+    def __call__(self, x):
+        shared_output, discrete_activation = self._trunk(x)
+
+        q_values = shared_output
+        for layer in self.value_head:
+            q_values = layer(q_values)
+
+        # Return order: q-values, one-hot bins (for counts), continuous count-layer FTA
+        # features (auxiliary target for the next-state forward model), and the head's
+        # prediction of the next state's continuous features (None when disabled).
+        return (
+            q_values,
+            self._discrete_representation(discrete_activation),
+            discrete_activation,
+            self._apply_next_state_head(shared_output),
+        )
+
+    @staticmethod
+    def _discrete_representation(discrete_activation):
+        # discrete_activation is (*features, num_bins); bins are the last axis.
+        # If the left linear tile is active it is negative, so argmax won't pick it,
+        # but it should still be the selected one-hot bin.
+        left_linear_active = discrete_activation[..., 0] < 0.0
+        argmax = jnp.argmax(discrete_activation, axis=-1)
+        # Either the left linear tile if active, or the argmax of the rest of the tiles
+        final_indices = jnp.where(left_linear_active, 0, argmax)
+        return one_hot(final_indices, discrete_activation.shape[-1])
+
+
+    def get_discrete_representation(self, states):
+        x = states / 255.0
+
+        for i, block in enumerate(self.blocks):
+            for layer in block:
+                x = layer(x)
+            # Depending on which layer is being used for counts, select the appropriate activation for the discrete representation
+            if i + 1 == self.count_layer:
+                discrete_activation = x
+                break
+
+        # return self._discrete_representation(jax.lax.stop_gradient(discrete_activation))
+        return self._discrete_representation(discrete_activation)
+
+    def _next_state_loss(self, mini_batch, predicted_next_features):
+        """Auxiliary task: predict the next state's continuous count-layer FTA
+        features from the current state's trunk (a one-step forward model in
+        feature space)."""
+        if not self.predicts_next_state:
+            # Reported as a flat zero rather than dropped, so metrics.npz keeps its
+            # loss_next_state key and the plotting scripts still load these runs.
+            return jnp.zeros(())
+
+        # Target: continuous FTA features of the next state, captured during the
+        # rollout. stop_gradient keeps it a fixed (rollout-time) target, like a
+        # lightweight target network; only the prediction side carries gradient
+        # into the encoder.
+        target = jax.lax.stop_gradient(mini_batch.next_continuous_state)
+        # Per-example mean over all feature + bin axes (rank-agnostic in *features).
+        per_example = 0.5 * jnp.mean(
+            (predicted_next_features - target) ** 2,
+            axis=tuple(range(1, predicted_next_features.ndim)),
+        )
+        # Mask transitions whose successor is a fresh episode reset, not a real
+        # next state.
+        mask = 1.0 - mini_batch.done
+        return jnp.sum(per_example * mask) / jnp.clip(jnp.sum(mask), a_min=1.0)
+
+    def loss(self, mini_batch, targets):
+        q_values, _, _, predicted_next_features = jax.vmap(self)(mini_batch.state)
+        index = jnp.arange(q_values.shape[0])
+        selected_q_values = q_values[index, mini_batch.action]
+
+        q_loss = 0.5 * jnp.mean((selected_q_values - targets) ** 2)
+        next_state_loss = self._next_state_loss(mini_batch, predicted_next_features)
+
+        total_loss = q_loss + self.next_state_coef * next_state_loss
+
+        losses = {
+            "total": total_loss,
+            "q": q_loss,
+            "next_state": next_state_loss,
+        }
+        return total_loss, (selected_q_values, losses)
+
+
+class QNetworkCNNSeperateValueHeads(QNetworkCNNCounts):
+    """Counts network with one value head per reward stream.
+
+    The extrinsic head fits the environment return and the intrinsic head fits the
+    raw count bonus, so neither regression has to track the other's scale. beta
+    never enters a target here -- it only weights the two heads when the caller
+    picks actions and when it forms the bootstrap.
+    """
+
+    intrinsic_value_head: list
+    intrinsic_loss_coef: float
+
+    def __init__(self, input_size, num_actions, key, network_config):
+        key, subkey = jax.random.split(key, 2)
+        super().__init__(input_size=input_size, num_actions=num_actions, key=subkey, network_config=network_config)
+
+        self.intrinsic_loss_coef = network_config.intrinsic_loss_coef
+        self.intrinsic_value_head = [
+            eqx.nn.Linear(
+                in_features=self.network_head_input_size,
+                out_features=num_actions,
+                key=key,
+            ),
+        ]
+
+    def __call__(self, x):
+        shared_output, discrete_activation = self._trunk(x)
+
+        extrinsic_q_values = shared_output
+        for layer in self.value_head:
+            extrinsic_q_values = layer(extrinsic_q_values)
+
+        intrinsic_q_values = shared_output
+        for layer in self.intrinsic_value_head:
+            intrinsic_q_values = layer(intrinsic_q_values)
+
+        # Return order: extrinsic q-values, intrinsic q-values, one-hot bins (for
+        # counts), continuous count-layer FTA features (auxiliary target for the
+        # next-state forward model), and the head's prediction of the next state's
+        # continuous features (None when disabled).
+        return (
+            extrinsic_q_values,
+            intrinsic_q_values,
+            self._discrete_representation(discrete_activation),
+            discrete_activation,
+            self._apply_next_state_head(shared_output),
+        )
+
+    def loss(self, mini_batch, targets):
+        # targets is a pair: the extrinsic lambda-returns and the intrinsic ones,
+        # built from the same rollout by the caller.
+        extrinsic_targets, intrinsic_targets = targets
+        extrinsic_q_values, intrinsic_q_values, _, _, predicted_next_features = (
+            jax.vmap(self)(mini_batch.state)
+        )
+
+        index = jnp.arange(extrinsic_q_values.shape[0])
+        selected_q_values = extrinsic_q_values[index, mini_batch.action]
+        selected_intrinsic_q_values = intrinsic_q_values[index, mini_batch.action]
+
+        q_loss = 0.5 * jnp.mean((selected_q_values - extrinsic_targets) ** 2)
+        intrinsic_q_loss = 0.5 * jnp.mean(
+            (selected_intrinsic_q_values - intrinsic_targets) ** 2
+        )
+        next_state_loss = self._next_state_loss(mini_batch, predicted_next_features)
+
+        total_loss = (
+            q_loss
+            + self.intrinsic_loss_coef * intrinsic_q_loss
+            + self.next_state_coef * next_state_loss
+        )
+
+        # "q" and "next_state" keep their names so the existing plotting scripts
+        # still find loss_q / loss_next_state in metrics.npz.
+        losses = {
+            "total": total_loss,
+            "q": q_loss,
+            "intrinsic_q": intrinsic_q_loss,
+            "next_state": next_state_loss,
+        }
+        return total_loss, ((selected_q_values, selected_intrinsic_q_values), losses)
+
+
+
+def merge_bins_into_channels(x):          # x: (C, H, W, num_bins)
+    c, h, w, bins = x.shape
+    x = jnp.moveaxis(x, -1, 1)            # -> (C, num_bins, H, W)
+    return x.reshape(c * bins, h, w)      # -> (C*num_bins, H, W)
+
+class QNetworkCNN(QNetwork):
+    cnn: list
+
+    def __init__(self, input_size, num_actions, key, network_config):
+        # Need to change input size
+        keys = jax.random.split(key, 4)
+        if network_config.padding == "VALID":
+            network_input = 3136
+        elif network_config.padding == "SAME":
+            network_input = 7744
+        else:
+            raise ValueError("Unknown padding type")
+
+        super().__init__(network_input, num_actions, keys[0], network_config)
+
+        self.cnn = [
+            eqx.nn.Conv2d(
+                in_channels=input_size,
+                out_channels=32,
+                kernel_size=(8, 8),
+                stride=(4, 4),
+                padding=network_config.padding,
+                key=keys[1],
+            ),
+            ChannelsLayerNorm(32),
+            eqx.nn.Lambda(jax.nn.relu),
+            eqx.nn.Conv2d(
+                in_channels=32,
+                out_channels=64,
+                kernel_size=(4, 4),
+                stride=(2, 2),
+                padding=network_config.padding,
+                key=keys[2],
+            ),
+            ChannelsLayerNorm(64),
+            eqx.nn.Lambda(jax.nn.relu),
+            eqx.nn.Conv2d(
+                in_channels=64,
+                out_channels=64,
+                kernel_size=(3, 3),
+                stride=(1, 1),
+                padding=network_config.padding,
+                key=keys[3],
+            ),
+            ChannelsLayerNorm(64),
+            eqx.nn.Lambda(jax.nn.relu),
+            eqx.nn.Lambda(jnp.ravel),
+        ]
+
+    def __call__(self, x):
+        x = x / 255.0
+
+        for layer in self.cnn:
+            x = layer(x)
+
+        for layer in self.blocks:
+            x = layer(x)
+
+        for layer in self.value_head:
+            x = layer(x)
+
+        return x
+
+    def loss(self, mini_batch, targets):
+        q_values = jax.vmap(self)(mini_batch.state)
+        index = jnp.arange(q_values.shape[0])
+        selected_q_values = q_values[index, mini_batch.action]
+
+        q_loss = 0.5 * jnp.mean((selected_q_values - targets) ** 2)
+
+        total_loss = q_loss
+
+        losses = {
+            "total": total_loss,
+            "q": q_loss,
+        }
+        return total_loss, (selected_q_values, losses)
+
+
 def make_network(input_size, num_actions, key, network_config):
     """Build the network corresponding to `network_config`.
 
@@ -371,6 +955,13 @@ def make_network(input_size, num_actions, key, network_config):
         )
     elif isinstance(network_config, QNetworkCountsConfig):
         return QNetworkCounts(
+            input_size=input_size,
+            num_actions=num_actions,
+            key=key,
+            network_config=network_config,
+        )
+    elif isinstance(network_config, CNNNetworkConfig):
+        return QNetworkCNNCounts(
             input_size=input_size,
             num_actions=num_actions,
             key=key,

@@ -56,10 +56,120 @@ class QNetworkCountsWithNextStatePrediction(BaseNetworkConfig):
     )
 
 
+@dataclasses.dataclass(frozen=True)
+class CNNNetworkConfig(BaseNetworkConfig):
+    type: Literal["cnn_network"] = "cnn_network"
+    padding: str = "VALID"
+
+
+@dataclasses.dataclass(frozen=True)
+class CNNCountsConfig(CNNNetworkConfig):
+    next_state_coef: float = 0.0
+    count_layer: int = 3
+    cnn_activation_1: ActivationConfig = Relu()
+    cnn_activation_2: ActivationConfig = Relu()
+    cnn_activation_3: ActivationConfig = FTA()
+
+
+@dataclasses.dataclass(frozen=True)
+class QNetworkCNNCountsDefaultConfig(CNNCountsConfig):
+    type: Literal["q_network_cnn_counts"] = "q_network_cnn_counts"
+    blocks: list[Block] = dataclasses.field(
+        default_factory=lambda: [Block(hidden_size=512)]
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class QNetworkCNNCountsTwoBlockConfig(CNNCountsConfig):
+    type: Literal["q_network_cnn_counts"] = "q_network_cnn_counts"
+    blocks: list[Block] = dataclasses.field(
+        default_factory=lambda: [FTABlock(hidden_size=512), Block(hidden_size=512)]
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class QNetworkCNNCountsFTAConfig(CNNCountsConfig):
+    type: Literal["q_network_cnn_counts"] = "q_network_cnn_counts"
+    blocks: list[Block] = dataclasses.field(
+        default_factory=lambda: [FTABlock(hidden_size=512)]
+    )
+
+@dataclasses.dataclass(frozen=True)
+class QNetworkCNNCountsReluConfig(CNNCountsConfig):
+    type: Literal["q_network_cnn_counts"] = "q_network_cnn_counts"
+    blocks: list[Block] = dataclasses.field(
+        default_factory=lambda: [FTABlock(hidden_size=512)]
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class QNetworkCNNSeperateHeadsConfig(CNNCountsConfig):
+    type: Literal["q_network_cnn_seperate_value_heads"] = (
+        "q_network_cnn_seperate_value_heads"
+    )
+    # Weight on the intrinsic head's TD loss. Static, like next_state_coef.
+    intrinsic_loss_coef: float = 1.0
+    blocks: list[Block] = dataclasses.field(
+        default_factory=lambda: [Block(hidden_size=512)]
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class QNetworkCNNSeperateHeadsFTAConfig(CNNCountsConfig):
+    type: Literal["q_network_cnn_seperate_value_heads"] = (
+        "q_network_cnn_seperate_value_heads"
+    )
+    intrinsic_loss_coef: float = 1.0
+    blocks: list[Block] = dataclasses.field(
+        default_factory=lambda: [FTABlock(hidden_size=512)]
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class QNetworkCNNConfig(CNNNetworkConfig):
+    type: Literal["q_network_cnn"] = "q_network_cnn"
+    blocks: list[Block] = dataclasses.field(
+        default_factory=lambda: [Block(hidden_size=512)]
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class QNetworkCNNTwoReluConfig(CNNNetworkConfig):
+    type: Literal["q_network_cnn"] = "q_network_cnn"
+    blocks: list[Block] = dataclasses.field(
+        default_factory=lambda: [Block(hidden_size=512), Block(hidden_size=512)]
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class QNetworkCNNFTAConfig(CNNNetworkConfig):
+    type: Literal["q_network_cnn"] = "q_network_cnn"
+    blocks: list[Block] = dataclasses.field(
+        default_factory=lambda: [FTABlock(hidden_size=512)]
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class QNetworkCNNTwoFTAConfig(CNNNetworkConfig):
+    type: Literal["q_network_cnn"] = "q_network_cnn"
+    blocks: list[Block] = dataclasses.field(
+        default_factory=lambda: [FTABlock(hidden_size=512), Block(hidden_size=512)]
+    )
+
+
 NetworkConfig = Union[
     QNetwork,
     QNetworkCartpole,
     QNetworkCounts,
     QNetworkCountsWithNextStatePrediction,
+    QNetworkCNNCountsTwoBlockConfig,
+    QNetworkCNNCountsFTAConfig,
+    QNetworkCNNSeperateHeadsConfig,
+    QNetworkCNNSeperateHeadsFTAConfig,
+    QNetworkCNNConfig,
+    QNetworkCNNCountsDefaultConfig,
+    QNetworkCNNTwoReluConfig,
+    QNetworkCNNFTAConfig,
+    QNetworkCNNTwoFTAConfig,
     BaseNetworkConfig,
 ]
