@@ -149,6 +149,9 @@ class Layout:
     different path layouts, so the glob and its parse travel together rather than
     being hardcoded in load_combos. `dims` names the grouping levels other than
     game/beta/seed, in the order their columns should be reported.
+
+    `pattern` must name `game` and `seed`; `beta` is optional, for sweeps that do
+    not vary it (see load_combos).
     """
 
     glob: str
@@ -258,7 +261,11 @@ def load_combos(
         )
         if match is None:
             continue
-        key = (match["game"], match["beta"], *(match[d] for d in layout.dims))
+        # `beta` is optional: a sweep whose only axis is something else (the pure-PQN
+        # baseline, whose tree is <game>/<bootstrap rule>/seed_*) has no beta_ level, and
+        # a layout that omits the group gets "" rather than an IndexError.
+        beta = match["beta"] if "beta" in layout.pattern.groupindex else ""
+        key = (match["game"], beta, *(match[d] for d in layout.dims))
         grouped.setdefault(key, []).append((match["seed"], metrics_path))
 
     combos: list[Combo] = []
