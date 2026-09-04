@@ -5,6 +5,12 @@
 # ale/ by relative path.
 #
 # Pass --dry-run to print the sbatch calls without submitting.
+#
+# Set CONFIG_NAME to submit a different config list from this directory -- in practice
+# configs_resume.txt, as written by resume_config.sh after a partial sweep:
+#   CONFIG_NAME=configs_resume.txt bash job_scripts/atari/<sweep>/run_sweep.sh
+# The chunking below is derived from `wc -l` of whichever file this names, so a shorter
+# resume list needs no bounds edited.
 
 DRY_RUN=0
 [ "$1" = "--dry-run" ] && DRY_RUN=1
@@ -12,7 +18,12 @@ DRY_RUN=0
 SWEEP_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 FOLDER_NAME=$(basename "$SWEEP_DIR")
 
-CONFIG_PATH="$SWEEP_DIR/configs.txt"
+CONFIG_PATH="$SWEEP_DIR/${CONFIG_NAME:-configs.txt}"
+
+if [ ! -f "$CONFIG_PATH" ]; then
+    echo "ERROR: config list not found at $CONFIG_PATH" >&2
+    exit 1
+fi
 
 OUTPUT_DIR="run_outputs/$FOLDER_NAME"
 [ "$DRY_RUN" -eq 0 ] && mkdir -p "$OUTPUT_DIR"

@@ -2,25 +2,35 @@
 # aip-mbowling / full L40S. 4 runs per GPU: keep --ntasks, the `for i` loop, the `4 *` in
 # LINE_NO, and RUNS_PER_TASK in run_sweep.sh in step.
 #
-# Two numbers differ from atari57_seperate_heads_sarsa_sweep/submit.sh, both because this
-# sweep runs next_state_coef > 0 and that sweep did not:
+# MEM_FRACTION stays at 0.22, the same as atari57_seperate_heads_sarsa_sweep and
+# atari57_count_layer_sweep, even though this sweep runs next_state_coef > 0 and they did
+# not. An earlier revision of this file raised it to 0.24 on the theory that the auxiliary
+# next-state target needed more room. That was wrong, and it broke the sweep:
 #
-#   MEM_FRACTION 0.22 -> 0.24
-#     A nonzero coefficient builds the auxiliary head and makes the rollout carry its
-#     per-transition target, which the 0.0 runs skip entirely (netwoks.py:599-631). At
-#     count_layer=2 that target is (num_steps=32, num_envs=128, 64, 9, 9, 10) float32 =
-#     849 MB, or ~1.7 GB counting the shuffle copy in process_data. num_bins is
-#     int(2*1.0/0.25) + 2 = 10 (layers.py:18-26) and conv2's features are 64x9x9 = 5184.
-#     The head itself adds only ~2.66M parameters.
+#   MEM_FRACTION is a *preallocation*, not a demand. XLA reserves that fraction of the GPU
+#   at process start regardless of what the program goes on to use, and the auxiliary
+#   buffer is allocated inside that pool -- so raising the fraction cannot "make room" for
+#   it. What it does do is raise total reservation from 4 x 0.22 = 0.88 to 4 x 0.24 = 0.96,
+#   leaving ~1.9 GB of the 48 GB L40S outside the pools for four CUDA contexts (~300-500 MB
+#   each) *plus* four cuBLAS workspaces, which cuBLAS allocates outside XLA's pool. At 0.24
+#   some runs died with "failed to create cublas handle: the resource allocation failed"
+#   during compilation/autotuning, then segfaulted on the null handle -- before the rollout
+#   was ever allocated. Marginal, so only some runs failed.
 #
-#     0.24 gives back ~0.96 GB per run, and 4 x 0.24 = 0.96 of the GPU leaves ~1.9 GB for
-#     four CUDA contexts. That is tighter than the arithmetic above wants, so this may
-#     OOM. Submit the offset-0 array job first, check a few tasks' logs in
-#     run_outputs/atari57_next_state_coef_sweep/ for RESOURCE_EXHAUSTED, and only then
-#     submit offset-1000. If it does OOM: drop to 3 runs per task at 0.30 (--ntasks,
-#     the `for i` loop, the `4 *` and RUNS_PER_TASK all move together), or store the
-#     target in bfloat16 at pqn_atari_counts_with_seperate_value_head.py:282 with a
-#     matching upcast in netwoks.py:_next_state_loss, which halves the buffer.
+#   The buffer was never the problem. At count_layer=2 the target is
+#   (num_steps=32, num_envs=128, 64, 9, 9, 10) float32 = 849 MB (num_bins is
+#   int(2*1.0/0.25) + 2 = 10, layers.py:18-26; conv2's features are 64x9x9 = 5184), and the
+#   head adds ~2.66M parameters. But discrete_state -- the one-hot, same (64, 9, 9, 10)
+#   shape, also float32 since jax.nn.one_hot returns float32 -- is *already* in the rollout
+#   at coef=0. Total rollout state goes 1.08 GB -> 1.93 GB inside a 10.56 GB pool. The
+#   "~2 GB at peak" in netwoks.py:599-603 is that whole footprint, not a delta on top of a
+#   full pool.
+#
+# So: 4 runs at 0.22. If a run ever does exhaust its own pool (unlikely -- persistent
+# rollout state is ~2 GB of the 10.56 GB, parameters plus Adam state are ~4.3M floats, and
+# a minibatch is 128 transitions), store the target in bfloat16 at
+# pqn_atari_counts_with_seperate_value_head.py:282 with a matching upcast in
+# netwoks.py:_next_state_loss, which halves it. Do not raise MEM_FRACTION.
 #
 #   time 08:59:00 -> 11:59:00
 #     The auxiliary head costs one more vmapped forward and backward per minibatch per
@@ -31,7 +41,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=4                 # 4 runs per job
 #SBATCH --cpus-per-task=4          # 4 cores per run
-#SBATCH --mem-per-cpu=7G           # 16 cores x 4G = 64G/job
+#SBATCH --mem-per-cpu=7G           # 16 cores x 7G = 112G/job (host RAM, not GPU)
 #SBATCH --time=11:59:00
 #SBATCH --gpus=1                   # one L40S, shared by the 4 runs
 #SBATCH --mail-user=slakins@ualberta.ca
@@ -62,13 +72,28 @@ cp /home/slakins/scratch/projects/partitionCountBasedExploration/roms/*.bin \
 # spawns ~64 threads per run and oversubscribes the node.
 TASK_OFFSET=${TASK_OFFSET:-0}
 EFFECTIVE_TASK=$((SLURM_ARRAY_TASK_ID + TASK_OFFSET))
+started=()
 for i in 0 1 2 3; do
     LINE_NO=$((4 * EFFECTIVE_TASK + i + 1))
     LINE=$(sed -n "${LINE_NO}p" "$CONFIG_PATH")
     [ -z "$LINE" ] && continue         # tolerate a short final task
-    XLA_PYTHON_CLIENT_MEM_FRACTION=0.24 \
+    XLA_PYTHON_CLIENT_MEM_FRACTION=0.22 \
         python pqn_atari_counts_with_seperate_value_head.py $LINE --num-env-threads 4 &
+    started+=("$!:$LINE_NO")
 done
 
-wait
-echo "All runs finished"
+# `wait` with no arguments returns 0 whatever the children did, so the previous
+# unconditional "All runs finished" reported success even when all four runs segfaulted --
+# which is how the 0.24 cuBLAS failure above came to be noticed only by reading stderr by
+# hand. Wait on each PID individually and propagate, so a failed task shows up as FAILED in
+# sacct and the offending config lines are named in the log.
+failed=0
+for entry in "${started[@]}"; do
+    if ! wait "${entry%%:*}"; then
+        echo "FAILED: config line ${entry##*:}" >&2
+        failed=$((failed + 1))
+    fi
+done
+
+echo "$((${#started[@]} - failed))/${#started[@]} runs finished"
+[ "$failed" -eq 0 ] || exit 1
